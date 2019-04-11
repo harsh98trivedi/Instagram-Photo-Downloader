@@ -10,12 +10,15 @@
     <!-- Common Tags -->
     <meta content='#ffffff' name='theme-color' />
 
-    <meta name="keywords" content="Instagram Photo Downloader, Insta Photo Downloader, Download Instagram Photos, Download Insta Photos, Insta Public Pic Downloader, Instagram Photo Downloader, IG, IG Photo Downloader, Instagram Photo Downloader HD, Instagram Photo Downloader Online, Clean and Simple Instagram Photo Downloader, CLean and Simple, Instagram Photos, Instagram HD Photo Downloader, High Definition Photo Downoader, IG Photo Research, Download Instagram Photos, Download Instagram Photos Easily, Harsh Trivedi">
+    <meta name="keywords"
+        content="Instagram Photo Downloader, Insta Photo Downloader, Download Instagram Photos, Download Insta Photos, Insta Public Pic Downloader, Instagram Photo Downloader, IG, IG Photo Downloader, Instagram Photo Downloader HD, Instagram Photo Downloader Online, Clean and Simple Instagram Photo Downloader, CLean and Simple, Instagram Photos, Instagram HD Photo Downloader, High Definition Photo Downoader, IG Photo Research, Download Instagram Photos, Download Instagram Photos Easily, Harsh Trivedi">
 
     <!-- Open Graph general (Facebook, Pinterest & Google+) -->
     <meta property="og:title" content="Instagram Photo Downloader" />
-    <meta property="og:description" content="Download Instagram photos with ease. Free, Clean & Simple Instagram Photo Downloader for you." />
-    <meta property="og:image" content="https://raw.github.com/harsh98trivedi/Instagram-Photo-Downloader/master/images/meta.jpg" />
+    <meta property="og:description"
+        content="Download Instagram photos with ease. Free, Clean & Simple Instagram Photo Downloader for you." />
+    <meta property="og:image"
+        content="https://raw.github.com/harsh98trivedi/Instagram-Photo-Downloader/master/images/meta.jpg" />
     <meta property="og:url" content="https://harsh98trivedi.github.io/Instagram-Photo-Downloader/" />
     <meta property="og:site_name" content="Instagram Photo Downloader" />
     <meta property="og:locale" content="en_US" />
@@ -24,19 +27,25 @@
     <meta content='https://www.facebook.com/TheHarshTrivedi' property='article:author' />
     <meta property="og:url" content="https://harsh98trivedi.github.io/Instagram-Photo-Downloader/" />
     <!-- Search Engine -->
-    <meta property="description" content="Download Instagram photos with ease. Free, Clean & Simple Instagram Photo Downloader for you." />
-    <meta property="image" content="https://raw.github.com/harsh98trivedi/Instagram-Photo-Downloader/master/images/meta.jpg" />
+    <meta property="description"
+        content="Download Instagram photos with ease. Free, Clean & Simple Instagram Photo Downloader for you." />
+    <meta property="image"
+        content="https://raw.github.com/harsh98trivedi/Instagram-Photo-Downloader/master/images/meta.jpg" />
     <!-- Schema.org for Google -->
     <meta itemprop="name" content="Instagram Photo Downloader" />
-    <meta itemprop="description" content="Download Instagram photos with ease. Free, Clean & Simple Instagram Photo Downloader for you." />
-    <meta itemprop="image" content="https://raw.github.com/harsh98trivedi/Instagram-Photo-Downloader/master/images/meta.jpg" />
+    <meta itemprop="description"
+        content="Download Instagram photos with ease. Free, Clean & Simple Instagram Photo Downloader for you." />
+    <meta itemprop="image"
+        content="https://raw.github.com/harsh98trivedi/Instagram-Photo-Downloader/master/images/meta.jpg" />
     <!-- Twitter -->
     <meta property="twitter:card" content="summary_large_image" />
     <meta property="twitter:title" content="Instagram Photo Downloader" />
-    <meta property="twitter:description" content="Download Instagram photos with ease. Free, Clean & Simple Instagram Photo Downloader for you." />
+    <meta property="twitter:description"
+        content="Download Instagram photos with ease. Free, Clean & Simple Instagram Photo Downloader for you." />
     <meta property="twitter:creator" content="@harsh98trivedi" />
     <meta property="twitter:creator:id" content="@harsh98trivedi" />
-    <meta property="twitter:image:src" content="https://raw.github.com/harsh98trivedi/Instagram-Photo-Downloader/master/images/meta.jpg" />
+    <meta property="twitter:image:src"
+        content="https://raw.github.com/harsh98trivedi/Instagram-Photo-Downloader/master/images/meta.jpg" />
     <meta property="twitter:image" content="Instagram Photo Downloader | Download Instagram photos with ease." />
 
     <link rel='icon' type='image/x-icon' href='images/favicon.png' />
@@ -44,12 +53,25 @@
     <link rel="stylesheet" href="css/style.css">
     <link href="https://fonts.googleapis.com/css?family=Dosis:500" rel="stylesheet">
 
+    <!-- Global site tag (gtag.js) - Google Analytics -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=UA-70447982-4"></script>
+    <script>
+        window.dataLayer = window.dataLayer || [];
+
+        function gtag() {
+            dataLayer.push(arguments);
+        }
+        gtag('js', new Date());
+
+        gtag('config', 'UA-70447982-4');
+    </script>
+
 
 </head>
 
 <body>
     <nav class="navbar container-fluid site-gradient text-center" id="nav">
-        <a  style="outline:none;" id="header-links" href="https://harsh98trivedi.github.io/Instagram-Photo-Downloader/">
+        <a style="outline:none;" id="header-links" href="https://harsh98trivedi.github.io/Instagram-Photo-Downloader/">
             <h1 id="header">INSTAGRAM PHOTO DOWNLOADER</h1>
         </a>
     </nav>
@@ -57,20 +79,24 @@
     <div class="container text-center" id="main">
         <div id="result" class="hidden">
             <!-- IMAGE PREVIEW -->
-            <img style="width: 320px;" class="shadow" id="imgpreview" src="images/placeholder.jpg" onerror="this.style.display='none'" />
+            <img style="width: 320px;" class="shadow" id="imgpreview" src="images/placeholder.jpg"
+                onerror="this.style.display='none'" />
             <!-- IMAGE PREVIEW -->
             <hr style="width:50vw;">
             <!-- INPUT AREA -->
             <div class="input-group">
-                <input id="instalink" autofocus type="text" class="form-control shadow" placeholder="ENTER INSTAGRAM POST URL HERE"
-                    spellcheck="false" onsubmit="insta_function(instalink.value);ShowMain()" autocomplete="off"/>
+                <input id="instalink" autofocus type="text" class="form-control shadow"
+                    placeholder="ENTER INSTAGRAM POST URL HERE" spellcheck="false"
+                    onsubmit="insta_function(instalink.value);ShowMain()" autocomplete="off" />
             </div>
-            <button id="imagedloadbtn" class="imagedloadbtn site-gradient" type="button" onclick="insta_function(instalink.value);ShowMain()">FETCH</button>
+            <button id="imagedloadbtn" class="imagedloadbtn site-gradient" type="button"
+                onclick="insta_function(instalink.value);ShowMain()">FETCH</button>
             <!-- INPUT AREA -->
 
             <!-- Download Buttons -->
             <div id="download-buttons">
-                <a target="_blank" id="imagehq" download><button class="imagedloadbtn site-gradient shadow">DOWNLOAD</button></a>
+                <a target="_blank" id="imagehq" download><button
+                        class="imagedloadbtn site-gradient shadow">DOWNLOAD</button></a>
                 <br>
                 <br>
             </div>
@@ -108,7 +134,8 @@
             <!-- Social Media Icons -->
         </div>
         <hr style="background: #ffffff; width: 50vw; opacity: 0.25;">
-        <p style="display: inline;">Made with <img style="margin-bottom: 0.15rem;" src="images/heart.png"> by <a target="_blank" href="https://harsh98trivedi.github.io">Harsh Trivedi</a></p>
+        <p style="display: inline;">Made with <img style="margin-bottom: 0.15rem;" src="images/heart.png"> by <a
+                target="_blank" href="https://harsh98trivedi.github.io">Harsh Trivedi</a></p>
     </footer>
 
     <script src="js/jquery3.3.1.min.js"></script>
