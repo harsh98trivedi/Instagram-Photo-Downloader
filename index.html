@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <title>Instagram Photo Downloader</title>
+    <!-- Required meta tags -->
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+
+    <!-- Common Tags -->
+    <meta content='#ffffff' name='theme-color' />
+
+    <meta name="keywords" content="Instagram Photo Downloader, Insta Photo Downloader, Download Instagram Photos, Download Insta Photos, Insta Public Pic Downloader, Instagram Photo Downloader, IG, IG Photo Downloader, Instagram Photo Downloader HD, Instagram Photo Downloader Online, Clean and Simple Instagram Photo Downloader, CLean and Simple, Instagram Photos, Instagram HD Photo Downloader, High Definition Photo Downoader, IG Photo Research, Download Instagram Photos, Download Instagram Photos Easily, Harsh Trivedi">
+
+    <!-- Open Graph general (Facebook, Pinterest & Google+) -->
+    <meta property="og:title" content="Instagram Photo Downloader" />
+    <meta property="og:description" content="Download Instagram photos with ease. Free, Clean & Simple Instagram Photo Downloader for you." />
+    <meta property="og:image" content="https://raw.github.com/harsh98trivedi/Instagram-Photo-Downloader/master/images/meta.jpg" />
+    <meta property="og:url" content="https://harsh98trivedi.github.io/Instagram-Photo-Downloader/" />
+    <meta property="og:site_name" content="Instagram Photo Downloader" />
+    <meta property="og:locale" content="en_US" />
+    <meta property="fb:admins" content="245221532650178" />
+    <meta property="og:type" content="website" />
+    <meta content='https://www.facebook.com/TheHarshTrivedi' property='article:author' />
+    <meta property="og:url" content="https://harsh98trivedi.github.io/Instagram-Photo-Downloader/" />
+    <!-- Search Engine -->
+    <meta property="description" content="Download Instagram photos with ease. Free, Clean & Simple Instagram Photo Downloader for you." />
+    <meta property="image" content="https://raw.github.com/harsh98trivedi/Instagram-Photo-Downloader/master/images/meta.jpg" />
+    <!-- Schema.org for Google -->
+    <meta itemprop="name" content="Instagram Photo Downloader" />
+    <meta itemprop="description" content="Download Instagram photos with ease. Free, Clean & Simple Instagram Photo Downloader for you." />
+    <meta itemprop="image" content="https://raw.github.com/harsh98trivedi/Instagram-Photo-Downloader/master/images/meta.jpg" />
+    <!-- Twitter -->
+    <meta property="twitter:card" content="summary_large_image" />
+    <meta property="twitter:title" content="Instagram Photo Downloader" />
+    <meta property="twitter:description" content="Download Instagram photos with ease. Free, Clean & Simple Instagram Photo Downloader for you." />
+    <meta property="twitter:creator" content="@harsh98trivedi" />
+    <meta property="twitter:creator:id" content="@harsh98trivedi" />
+    <meta property="twitter:image:src" content="https://raw.github.com/harsh98trivedi/Instagram-Photo-Downloader/master/images/meta.jpg" />
+    <meta property="twitter:image" content="Instagram Photo Downloader | Download Instagram photos with ease." />
+
+    <link rel='icon' type='image/x-icon' href='images/favicon.png' />
+    <link rel="stylesheet" href="css/bootstrap.min.css">
+    <link rel="stylesheet" href="css/style.css">
+    <link href="https://fonts.googleapis.com/css?family=Dosis:500" rel="stylesheet">
+
+
+</head>
+
+<body>
+    <nav class="navbar container-fluid site-gradient text-center" id="nav">
+        <a  style="outline:none;" id="header-links" href="https://harsh98trivedi.github.io/Instagram-Photo-Downloader/">
+            <h1 id="header">INSTAGRAM PHOTO DOWNLOADER</h1>
+        </a>
+    </nav>
+
+    <div class="container text-center" id="main">
+        <div id="result" class="hidden">
+            <!-- IMAGE PREVIEW -->
+            <img style="width: 320px;" class="shadow" id="imgpreview" src="images/placeholder.jpg" onerror="this.style.display='none'" />
+            <!-- IMAGE PREVIEW -->
+            <hr style="width:50vw;">
+            <!-- INPUT AREA -->
+            <div class="input-group">
+                <input id="instalink" autofocus type="text" class="form-control shadow" placeholder="ENTER INSTAGRAM POST URL HERE"
+                    spellcheck="false" onsubmit="insta_function(instalink.value);ShowMain()" autocomplete="off"/>
+            </div>
+            <button id="imagedloadbtn" class="imagedloadbtn site-gradient" type="button" onclick="insta_function(instalink.value);ShowMain()">FETCH</button>
+            <!-- INPUT AREA -->
+
+            <!-- Download Buttons -->
+            <div id="download-buttons">
+                <a target="_blank" id="imagehq" download><button class="imagedloadbtn site-gradient shadow">DOWNLOAD</button></a>
+                <br>
+                <br>
+            </div>
+            <!-- Download Buttons -->
+        </div>
+    </div>
+
+    <footer id="footer" class="site-gradient container-fluid text-center">
+        <div id="social-media">
+            <!-- Social Media Icons -->
+            <a href="https://www.facebook.com/harsh98trivedi" target="_blank" id="social-media-icons">
+                <img id="social" src="images/svg/facebook.svg" alt="Facebook"></img>
+            </a>
+            <a href="https://www.twitter.com/harsh98trivedi" target="_blank" id="social-media-icons">
+                <img id="social" src="images/svg/twitter.svg" alt="Twitter"></img>
+            </a>
+            <a href="https://www.youtube.com/harsh98trivedi" target="_blank" id="social-media-icons">
+                <img id="social" src="images/svg/youtube.svg" alt="YouTube"></img>
+            </a>
+            <a href="https://plus.google.com/+harsh98trivedi" target="_blank" id="social-media-icons">
+                <img id="social" src="images/svg/googleplus.svg" alt="Google+"></img>
+            </a>
+            <a href="https://www.instagram.com/harsh98trivedi" target="_blank" id="social-media-icons">
+                <img id="social" src="images/svg/instagram.svg" alt="Instagram"></img>
+            </a>
+            <a href="https://www.reddit.com/u/harshtrivedi" target="_blank" id="social-media-icons">
+                <img id="social" src="images/svg/reddit.svg" alt="Reddit"></img>
+            </a>
+            <a href="https://www.github.com/harsh98trivedi" target="_blank" id="social-media-icons">
+                <img id="social" src="images/svg/github.svg" alt="Github"></img>
+            </a>
+            <a href="mailto:harsh98trivedi@gmail.com" id="social-media-icons">
+                <img id="social" src="images/svg/gmail.svg" alt="Email"></img>
+            </a>
+            <!-- Social Media Icons -->
+        </div>
+        <hr style="background: #ffffff; width: 50vw; opacity: 0.25;">
+        <p style="display: inline;">Made with <img style="margin-bottom: 0.15rem;" src="images/heart.png"> by <a target="_blank" href="https://harsh98trivedi.github.io">Harsh Trivedi</a></p>
+    </footer>
+
+    <script src="js/jquery3.3.1.min.js"></script>
+    <script src="js/instaimage.js"></script>
+
+    <script>
+        $('#instalink').keydown(function (e) {
+            var keyCode = (e.keyCode ? e.keyCode : e.which);
+            if (keyCode == 13) {
+                $('#imagedloadbtn').trigger('click');
+            }
+        });
+    </script>
+    <script>
+        $("#preview div").hide();
+        $("#preview");
+    </script>
+
+    <script>
+        var realImage = document.getElementById('imgpreview');
+        var loadingImage = document.getElementById('loadingImage');
+        loadingImage.style.display = 'inline';
+        realImage.style.display = 'none';
+
+        // Create new image
+        var imgPreloader = new Image();
+        // define onload (= image loaded)
+        imgPreloader.onload = function () {
+            realImage.src = imgPreloader.src;
+            realImage.style.display = 'inline';
+            loadingImage.style.display = 'none';
+        };
+        // set image source
+        imgPreloader.src = 'images/placeholder.gif';
+    </script>
+
+</body>
