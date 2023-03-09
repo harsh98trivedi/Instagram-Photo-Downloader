@@ -3,8 +3,8 @@ function insta_function(url) {
     match = url.match(regExp);
     if (match && match[1].length >= 11) {
         posturl = match[1];
-        imgpreview = posturl + 'media?size=l';
-        imagehq = posturl + 'media?size=l';
+        imgpreview = posturl + 'media?size=m';
+        imagehq = posturl + 'media?size=m';
         document.getElementById('imgpreview').src = imgpreview;
         document.getElementById('imagehq').href = imagehq;
     } else {
