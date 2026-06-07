@@ -1,0 +1,15 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Outfit", sans-serif;
+  
+  --color-instagram-bg: #121214;
+  --color-instagram-dark: #1f1f23;
+  --color-instagram-light: #2d2d34;
+  --color-instagram-border: #3a3a44;
+  --color-instagram-magenta: #e1306c;
+}
+
+::-webkit-scrollbar {
+  display: none;
+}

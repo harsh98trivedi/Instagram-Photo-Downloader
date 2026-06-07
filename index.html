@@ -3,12 +3,37 @@
 
 <head>
     <title>Instagram Photo Downloader</title>
+    <!-- Suppress third-party extension error logs in the console -->
+    <script>
+        window.addEventListener('error', function (e) {
+            if (e.filename && (e.filename.includes('chrome-extension://') || e.filename.includes('Grammarly-check.js') || e.filename.includes('Grammarly.js'))) {
+                e.stopImmediatePropagation();
+                e.preventDefault();
+                return;
+            }
+            if (e.message && (e.message.includes('envOverride') || e.message.includes('tabs:outgoing.message.ready') || e.message.includes('No Listener'))) {
+                e.stopImmediatePropagation();
+                e.preventDefault();
+            }
+        }, true);
+
+        window.addEventListener('unhandledrejection', function (e) {
+            const reason = e.reason;
+            if (reason) {
+                const msg = reason.message || String(reason);
+                if (msg.includes('tabs:outgoing.message.ready') || msg.includes('envOverride') || msg.includes('No Listener')) {
+                    e.stopImmediatePropagation();
+                    e.preventDefault();
+                }
+            }
+        }, true);
+    </script>
     <!-- Required meta tags -->
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, height=device-height, initial-scale=1 user-scalable=no, shrink-to-fit=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
 
     <!-- Common Tags -->
-    <meta content='#ffffff' name='theme-color' />
+    <meta content='#1c1c1e' name='theme-color' />
 
     <meta name="keywords"
         content="Instagram Photo Downloader, Insta Photo Downloader, Download Instagram Photos, Download Insta Photos, Insta Public Pic Downloader, Instagram Photo Downloader, IG, IG Photo Downloader, Instagram Photo Downloader HD, Instagram Photo Downloader Online, Clean and Simple Instagram Photo Downloader, CLean and Simple, Instagram Photos, Instagram HD Photo Downloader, High Definition Photo Downoader, IG Photo Research, Download Instagram Photos, Download Instagram Photos Easily, Harsh Trivedi">
@@ -25,11 +50,10 @@
     <meta property="fb:admins" content="245221532650178" />
     <meta property="og:type" content="website" />
     <meta content='https://www.facebook.com/TheHarshTrivedi' property='article:author' />
-    <meta property="og:url" content="https://harsh98trivedi.github.io/Instagram-Photo-Downloader/" />
     <!-- Search Engine -->
-    <meta property="description"
+    <meta name="description"
         content="Download Instagram photos with ease. Free, Clean & Simple Instagram Photo Downloader for you." />
-    <meta property="image"
+    <meta name="image"
         content="https://raw.github.com/harsh98trivedi/Instagram-Photo-Downloader/master/images/meta.jpg" />
     <!-- Schema.org for Google -->
     <meta itemprop="name" content="Instagram Photo Downloader" />
@@ -49,124 +73,190 @@
     <meta property="twitter:image" content="Instagram Photo Downloader | Download Instagram photos with ease." />
 
     <link rel='icon' type='image/x-icon' href='images/favicon.png' />
-    <link rel="stylesheet" href="css/bootstrap.min.css">
-    <link rel="stylesheet" href="css/style.css">
-    <link href="https://fonts.googleapis.com/css?family=Dosis:500" rel="stylesheet">
+
+    <!-- Google Fonts: Outfit -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" integrity="sha512-DTOQO9RWCH3ppGqcWaEA1BIZOC6xxalwEsw9c2QQeAIftl+Vegovlnee1c9QX4TctnWMn13TZye+giMm8e2LwA==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+
+    <!-- Tailwind CSS -->
+    <link rel="stylesheet" href="css/tailwind.min.css">
 
     <!-- Google tag (gtag.js) -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-45C37D3GB5"></script>
     <script>
-    window.dataLayer = window.dataLayer || [];
-    function gtag(){dataLayer.push(arguments);}
-    gtag('js', new Date());
-
-    gtag('config', 'G-45C37D3GB5');
+        window.dataLayer = window.dataLayer || [];
+        function gtag(){dataLayer.push(arguments);}
+        gtag('js', new Date());
+        gtag('config', 'G-45C37D3GB5');
     </script>
-
-
 </head>
 
-<body>
-    <nav class="navbar container-fluid site-gradient text-center" id="nav">
-        <a style="outline:none;" id="header-links" href="https://harsh98trivedi.github.io/Instagram-Photo-Downloader/">
-            <h1 id="header">INSTAGRAM PHOTO DOWNLOADER</h1>
+<body class="bg-instagram-bg min-h-screen text-white font-sans flex flex-col justify-between antialiased selection:bg-instagram-magenta selection:text-white">
+    <!-- Navbar / Header -->
+    <nav class="bg-instagram-dark shadow-md border-b border-instagram-border py-5 text-center">
+        <a href="https://harsh98trivedi.github.io/Instagram-Photo-Downloader/" class="inline-flex items-center space-x-3 group justify-center">
+            <img src="images/favicon.png" alt="Logo" class="w-8 h-8 rounded-lg object-contain group-hover:scale-110 transition-transform duration-300" />
+            <h1 class="text-xl sm:text-2xl font-bold tracking-tight select-none bg-clip-text text-transparent bg-gradient-to-r from-purple-500 via-instagram-magenta to-orange-400">
+                INSTAGRAM PHOTO DOWNLOADER
+            </h1>
         </a>
     </nav>
 
-    <div class="container text-center" id="main">
-        <div id="result" class="hidden">
-            <!-- IMAGE PREVIEW -->
-            <img style="width: 320px;" class="shadow" id="imgpreview" src="images/placeholder.jpg"
-                onerror="this.style.display='none'" />
-            <!-- IMAGE PREVIEW -->
-            <hr style="width:50vw;">
-            <!-- INPUT AREA -->
-            <div class="input-group">
-                <input id="instalink" autofocus type="text" class="form-control shadow"
-                    placeholder="ENTER INSTAGRAM POST URL HERE" spellcheck="false"
-                    onsubmit="insta_function(instalink.value);ShowMain()" autocomplete="off" />
-            </div>
-            <button id="imagedloadbtn" class="imagedloadbtn site-gradient" type="button"
-                onclick="insta_function(instalink.value);ShowMain()">FETCH</button>
-            <!-- INPUT AREA -->
+    <!-- Main Container -->
+    <main class="flex-grow flex items-center justify-center px-4 py-8 bg-instagram-bg">
+        <div class="rounded-2xl shadow-2xl bg-instagram-light border border-instagram-border w-full max-w-md p-6 flex flex-col items-center hover:border-gray-500 transition-all duration-300">
 
-            <!-- Download Buttons -->
-            <div id="download-buttons">
-                <a target="_blank" id="imagehq" download><button
-                        class="imagedloadbtn site-gradient shadow">DOWNLOAD</button>
-                </a>
-                <a onclick="window.location.reload();" id="imagehq"><button
-                        class="imagedloadbtn site-gradient shadow">RELOAD</button>
-                </a>
-                <br>
-            </div>
-            <!-- Download Buttons -->
-        </div>
-    </div>
 
-    <footer id="footer" class="site-gradient container-fluid text-center">
-        <div id="social-media">
-            <!-- Social Media Icons -->
-            <a href="https://www.facebook.com/harsh98trivedi" target="_blank" id="social-media-icons">
-                <img id="social" src="images/svg/facebook.svg" alt="Facebook"></img>
-            </a>
-            <a href="https://www.twitter.com/harsh98trivedi" target="_blank" id="social-media-icons">
-                <img id="social" src="images/svg/twitter.svg" alt="Twitter"></img>
-            </a>
-            <a href="https://www.youtube.com/harsh98trivedi" target="_blank" id="social-media-icons">
-                <img id="social" src="images/svg/youtube.svg" alt="YouTube"></img>
-            </a>
-            <a href="https://www.instagram.com/harsh98trivedi" target="_blank" id="social-media-icons">
-                <img id="social" src="images/svg/instagram.svg" alt="Instagram"></img>
-            </a>
-            <a href="https://www.reddit.com/u/harshtrivedi" target="_blank" id="social-media-icons">
-                <img id="social" src="images/svg/reddit.svg" alt="Reddit"></img>
-            </a>
-            <a href="https://www.github.com/harsh98trivedi" target="_blank" id="social-media-icons">
-                <img id="social" src="images/svg/github.svg" alt="Github"></img>
-            </a>
-            <a href="mailto:harsh98trivedi@gmail.com" id="social-media-icons">
-                <img id="social" src="images/svg/gmail.svg" alt="Email"></img>
-            </a>
-            <!-- Social Media Icons -->
+            <!-- Input Form -->
+            <div id="form-container" class="w-full space-y-4">
+                <div class="relative w-full">
+                    <input id="instalink" autofocus type="text"
+                        class="px-6 py-3.5 rounded-xl bg-instagram-bg border-2 border-instagram-border text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-instagram-magenta text-base tracking-wide transition w-full text-center font-medium"
+                        placeholder="PASTE INSTAGRAM POST URL HERE" spellcheck="false" autocomplete="off"
+                        data-gramm="false" data-gramm_editor="false" data-enable-grammarly="false" />
+                    <button id="clear-btn" onclick="document.getElementById('instalink').value = '';" class="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white transition-colors duration-200">
+                        <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                    </button>
+                </div>
+
+                <button id="fetch-btn" onclick="fetchInstaPhoto()"
+                    class="rounded-xl w-full py-3.5 font-bold bg-gradient-to-r from-purple-600 via-instagram-magenta to-orange-400 hover:brightness-110 active:scale-[0.98] shadow transition text-white tracking-wide text-lg focus:outline-none">
+                    FETCH
+                </button>
+            </div>
+
+            <!-- Loader (hidden by default) -->
+            <div id="loader" class="hidden flex flex-col items-center justify-center py-8 space-y-3">
+                <svg class="animate-spin h-10 w-10 text-instagram-magenta" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <span class="text-sm font-medium text-gray-300">Retrieving post content...</span>
+            </div>
+
+            <!-- Error Message (hidden by default) -->
+            <div id="error-message" class="hidden mt-6 bg-red-500/20 border-l-4 border-red-500 rounded-xl p-4 text-red-200 text-sm flex items-start space-x-2 w-full">
+                <svg class="h-5 w-5 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+                <span>The URL you entered appears to be incorrect. Please make sure it is correct and the post is public.</span>
+            </div>
+
+            <!-- Result Section (hidden by default) -->
+            <div id="result-section" class="hidden mt-4 w-full flex flex-col items-center">
+                <!-- Image Preview Container -->
+                <div id="image-container" class="relative overflow-hidden rounded-xl border-2 border-instagram-border shadow-md w-full max-w-sm mb-7 bg-instagram-dark flex items-center justify-center min-h-[300px]">
+                    <!-- Direct img preview (shown when CDN URL resolved) -->
+                    <img id="imgpreview" class="hidden w-full h-auto object-contain rounded-xl max-h-[480px]" src="" alt="Instagram Image Preview" />
+                    <!-- Iframe embed preview (shown immediately as reliable fallback, no CORS needed) -->
+                    <iframe id="embed-iframe"
+                        class="hidden w-full rounded-xl"
+                        style="min-height:420px; border:none;"
+                        scrolling="no"
+                        allowtransparency="true">
+                    </iframe>
+                    <!-- Loading placeholder inside preview (hidden by default) -->
+                    <div id="preview-loader" class="hidden absolute inset-0 bg-instagram-dark/80 flex flex-col items-center justify-center space-y-2">
+                        <svg class="animate-spin h-8 w-8 text-instagram-magenta" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        <span class="text-xs text-gray-300 font-medium">Loading preview image...</span>
+                    </div>
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="w-full space-y-3">
+                    <button id="download-btn" onclick="downloadPhoto()"
+                        class="rounded-xl w-full py-3.5 font-bold bg-gradient-to-r from-purple-600 via-instagram-magenta to-orange-400 hover:brightness-110 active:scale-[0.98] shadow transition text-white tracking-wide text-lg focus:outline-none flex justify-center items-center space-x-2">
+                        <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                        </svg>
+                        <span>DOWNLOAD PHOTO</span>
+                    </button>
+                    <button id="reload-btn" onclick="resetApp()"
+                        class="w-full py-3.5 rounded-xl font-semibold border-2 border-instagram-border hover:border-white hover:bg-instagram-bg transition text-white text-lg focus:outline-none bg-instagram-light">
+                        START OVER
+                    </button>
+                </div>
+            </div>
         </div>
-        <hr style="background: #ffffff; width: 50vw; opacity: 0.25;">
-        <p style="display: inline;">Made with <img style="margin-bottom: 0.15rem;" src="images/heart.png"> by <a
-                target="_blank" href="https://harsh98trivedi.github.io">Harsh Trivedi</a></p>
+    </main>
+
+    <!-- Footer -->
+    <footer class="py-5 text-center bg-instagram-dark border-t border-instagram-border text-white text-base">
+        <div class="flex flex-col items-center space-y-3">
+            <!-- Social Media Icons -->
+            <div class="flex justify-center items-center gap-4">
+                <a href="https://www.facebook.com/harsh98trivedi" target="_blank" class="hover:scale-110 active:scale-95 transition-transform duration-200" title="Facebook">
+                    <i class="fa-brands fa-facebook text-2xl text-gray-400 hover:text-[#1877f2] transition-colors duration-200"></i>
+                </a>
+                <a href="https://www.twitter.com/harsh98trivedi" target="_blank" class="hover:scale-110 active:scale-95 transition-transform duration-200" title="Twitter">
+                    <i class="fa-brands fa-x-twitter text-2xl text-gray-400 hover:text-white transition-colors duration-200"></i>
+                </a>
+                <a href="https://www.youtube.com/harsh98trivedi" target="_blank" class="hover:scale-110 active:scale-95 transition-transform duration-200" title="YouTube">
+                    <i class="fa-brands fa-youtube text-2xl text-gray-400 hover:text-[#ff0000] transition-colors duration-200"></i>
+                </a>
+                <a href="https://www.instagram.com/harsh98trivedi" target="_blank" class="hover:scale-110 active:scale-95 transition-transform duration-200" title="Instagram">
+                    <i class="fa-brands fa-instagram text-2xl text-gray-400 hover:text-[#e1306c] transition-colors duration-200"></i>
+                </a>
+                <a href="https://www.reddit.com/u/harshtrivedi" target="_blank" class="hover:scale-110 active:scale-95 transition-transform duration-200" title="Reddit">
+                    <i class="fa-brands fa-reddit text-2xl text-gray-400 hover:text-[#ff4500] transition-colors duration-200"></i>
+                </a>
+                <a href="https://www.github.com/harsh98trivedi" target="_blank" class="hover:scale-110 active:scale-95 transition-transform duration-200" title="Github">
+                    <i class="fa-brands fa-github text-2xl text-gray-400 hover:text-white transition-colors duration-200"></i>
+                </a>
+                <a href="mailto:harsh98trivedi@gmail.com" class="hover:scale-110 active:scale-95 transition-transform duration-200" title="Email">
+                    <i class="fa-solid fa-envelope text-2xl text-gray-400 hover:text-[#ea4335] transition-colors duration-200"></i>
+                </a>
+            </div>
+            <p class="text-sm text-gray-400 flex items-center space-x-1.5 pt-1">
+                <span>Made with</span>
+                <i class="fa-solid fa-heart text-red-500 animate-pulse text-xs"></i>
+                <span>by</span>
+                <a target="_blank" href="https://harsh98trivedi.github.io" class="hover:text-instagram-magenta font-semibold underline decoration-dotted transition-colors duration-200">Harsh Trivedi</a>
+            </p>
+        </div>
     </footer>
 
-    <script src="js/jquery3.3.1.min.js"></script>
-    <script src="js/instaimage.js"></script>
-
+    <!-- App Logic Scripts -->
+    <script src="js/instaimage.js?v=2.0.8"></script>
     <script>
-        $('#instalink').keydown(function (e) {
-            var keyCode = (e.keyCode ? e.keyCode : e.which);
-            if (keyCode == 13) {
-                $('#imagedloadbtn').trigger('click');
+        // Trigger fetch on Enter key inside URL input
+        document.getElementById('instalink').addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') {
+                fetchInstaPhoto();
             }
+            
         });
-    </script>
-    <script>
-        $("#preview div").hide();
-        $("#preview");
-    </script>
 
-    <script>
-        var realImage = document.getElementById('imgpreview');
-        var loadingImage = document.getElementById('loadingImage');
-        loadingImage.style.display = 'inline';
-        realImage.style.display = 'none';
-
-        // Create new image
-        var imgPreloader = new Image();
-        // define onload (= image loaded)
-        imgPreloader.onload = function () {
-            realImage.src = imgPreloader.src;
-            realImage.style.display = 'inline';
-            loadingImage.style.display = 'none';
-        };
-        // set image source
-        imgPreloader.src = 'images/placeholder.gif';
+        // Mock error dispatch for testing suppression of extension warnings
+        if (window.location.search.includes('test=true')) {
+            console.log('[Test] Running mock error tests...');
+            setTimeout(() => {
+                const p = Promise.reject(new Error('No Listener: tabs:outgoing.message.ready'));
+                window.dispatchEvent(new PromiseRejectionEvent('unhandledrejection', {
+                    promise: p,
+                    reason: p
+                }));
+            }, 500);
+            setTimeout(() => {
+                window.dispatchEvent(new ErrorEvent('error', {
+                    message: '[envOverride] Failed to read override, skipping: envOverride read timed out',
+                    filename: 'Grammarly-check.js',
+                    lineno: 1,
+                    colno: 1,
+                    error: new Error('[envOverride] Failed to read override, skipping: envOverride read timed out')
+                }));
+            }, 1000);
+        }
     </script>
-
 </body>
+
+</html>
