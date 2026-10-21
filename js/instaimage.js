@@ -135,13 +135,54 @@ function parseSidecarImages(rawHtmlContent) {
 }
 
 // Full extraction used by every HTML-scraping strategy: prefer the ordered
-// sidecar slides, fall back to the legacy single-image heuristics.
+// sidecar slides, then any single-video node (reels), then legacy heuristics.
 function extractAllImages(rawHtmlContent) {
     const sidecarItems = parseSidecarImages(rawHtmlContent);
     if (sidecarItems.length > 0) return sidecarItems;
 
+    // Single media posts (reels, one-off videos) carry no sidecar blob, but
+    // their contextJSON node has the same shape the sidecar scan knows —
+    // "shortcode":"X","is_video":true,"display_url":… — with video_url in
+    // the node window. Recover it directly so reels resolve as videos.
+    const videoItem = parseSingleVideoPost(rawHtmlContent);
+    if (videoItem) return [videoItem];
+
     const legacyUrl = extractInstagramImage(rawHtmlContent);
     return legacyUrl ? [{ type: 'photo', thumb: legacyUrl, url: legacyUrl }] : [];
+}
+
+// Single-video pass: the parse contract mirrors parseSidecarImages exactly
+// (same decode, same validators, same bounded video_url window) minus the
+// edge_sidecar_to_children gate. Ignores is_video:false singles — those stay
+// with the legacy photo heuristics. Returns one item or null.
+function parseSingleVideoPost(rawHtmlContent) {
+    if (!rawHtmlContent) return null;
+
+    // Decode FIRST: the contextJSON blob stores escaped quotes
+    // (\"is_video\":true), so a pre-decode gate on the unescaped substring
+    // would never fire on real pages.
+    const htmlContent = decodeUnicode(rawHtmlContent)
+        .replace(/\\"/g, '"')
+        .replace(/\\\\/g, '\\');
+
+    if (htmlContent.indexOf('"is_video":true') === -1) return null;
+
+    const match = /"shortcode":"([A-Za-z0-9_-]+)","is_video":true,"display_url":"([^"]+)"/.exec(htmlContent);
+    if (!match) return null;
+
+    const thumb = cleanInstagramUrl(match[2]);
+    if (!isValidSidecarImageUrl(thumb)) return null;
+
+    // Identical window rule to the sidecar scan: heavy video metadata
+    // (dash manifests) can push video_url far past display_url.
+    const rest = htmlContent.slice(match.index + match[0].length);
+    let nodeEnd = rest.search(/"shortcode":"|"is_video":/);
+    if (nodeEnd === -1) nodeEnd = rest.length;
+    const videoMatch = rest.slice(0, nodeEnd).match(/"video_url":"([^"]+)"/);
+    const videoUrl = videoMatch ? cleanInstagramUrl(videoMatch[1]) : null;
+    if (!videoUrl || !(videoUrl.includes('cdninstagram.com') || videoUrl.includes('fbcdn.net'))) return null;
+
+    return { type: 'video', thumb, url: videoUrl };
 }
 
 
@@ -701,8 +742,9 @@ function prefetchItem(item) {
 
 // Background enumeration for posts where a media endpoint could only resolve
 // the cover image. Races the HTML-scraping proxies and returns the slide list
-// only when strictly more slides were found.
-async function enrichCarouselItems(shortcode, knownCount) {
+// when strictly more slides were found — or when the scrape retrofits a photo
+// cover into its video (single media posts, same success shape).
+async function enrichCarouselItems(shortcode, knownCount, knownHasVideo = false) {
     const targetUrl = `https://www.instagram.com/p/${shortcode}/embed/`;
 
     const attemptScrape = async () => {
@@ -727,12 +769,18 @@ async function enrichCarouselItems(shortcode, knownCount) {
 
     // A SUCCESSFUL scrape is ground truth for the post's slide list — if it
     // reports the same count as the cover-only result, retrying cannot add
-    // slides, so stop immediately. Retries only pay off when ALL scrapers
-    // failed (transient upstream outage, e.g. an echo of a 522).
+    // slides, so stop immediately. EXCEPT the single-media case: a video node
+    // and its photo cover share the SAME count (reels arrive poster-only from
+    // the media endpoint), so an equal count must still upgrade when the
+    // scrape found a video the cover lacked. Retries only pay off when ALL
+    // scrapers failed (transient upstream outage, e.g. an echo of a 522).
     for (let attempt = 1; attempt <= 2; attempt++) {
         try {
             const scraped = await attemptScrape();
-            if (scraped.items.length > knownCount) {
+            const upgradesKind = scraped.items.length === knownCount
+                && !knownHasVideo
+                && scraped.items.some(item => item.type === 'video');
+            if (scraped.items.length > knownCount || upgradesKind) {
                 console.log(`[Carousel] Enrichment via ${scraped.proxyName}: ${scraped.items.length} slides total`);
                 // Pure result: the CALLER applies proxy bookkeeping after its
                 // staleness check, so a late enrich can never repoint a page
@@ -844,7 +892,7 @@ async function fetchInstaPhoto() {
         // Media endpoints can only ever resolve the cover slide — enumerate the
         // full carousel in the background and upgrade the gallery if useful.
         if (coverOnly) {
-            enrichCarouselItems(shortcode, items.length).then(enriched => {
+            enrichCarouselItems(shortcode, items.length, items.some(item => item.type === 'video')).then(enriched => {
                 if (!enriched || currentShortcode !== shortcode) return;
                 revokeAllCachedBlobs(); // cover blob and stale prefetches are gone
                 // Proxy bookkeeping applies HERE — after the staleness check —
