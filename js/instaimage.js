@@ -69,6 +69,82 @@ function extractInstagramImage(rawHtmlContent) {
 }
 
 
+// Strip residual escape backslashes that survive the JSON-in-JSON decoding.
+// Sidecar URLs arrive as e.g. https:\\\/\\\/scontent...
+function cleanInstagramUrl(url) {
+    return url ? url.replace(/\\+/g, '') : url;
+}
+
+// Lighter validator for URLs parsed from the trusted sidecar JSON region.
+// isValidImageUrl's strict signature-param rule is meant for the noisy raw
+// HTML sweep, where static assets and avatars are common false positives.
+function isValidSidecarImageUrl(url) {
+    if (!url) return false;
+    const lower = url.toLowerCase();
+    if (!lower.includes('cdninstagram.com') && !lower.includes('fbcdn.net')) return false;
+    if (lower.includes('/rsrc.php')) return false;
+    if (lower.includes('static.cdninstagram.com')) return false;
+    if (/\.(js|css|ico|woff|woff2|ttf|svg)(\?|$)/.test(lower)) return false;
+    if (lower.includes('t51.2885-19')) return false;
+    return true;
+}
+
+// Carousel posts expose every slide inside an "edge_sidecar_to_children"
+// JSON blob embedded in the /embed/ HTML. Nodes appear in carousel order as
+//   \"shortcode\":\"X\",\"is_video\":false,\"display_url\":\"...\"
+// and video slides additionally carry \"video_url\":\"...\".
+function parseSidecarImages(rawHtmlContent) {
+    if (!rawHtmlContent || rawHtmlContent.indexOf('edge_sidecar_to_children') === -1) return [];
+
+    // Un-nest the double-encoded JSON (\" -> " and \\ -> \) on top of the
+    // unicode/slash/html-entity decode that extractInstagramImage already does.
+    const htmlContent = decodeUnicode(rawHtmlContent)
+        .replace(/\\"/g, '"')
+        .replace(/\\\\/g, '\\');
+
+    const nodeRegex = /"shortcode":"([A-Za-z0-9_-]+)","is_video":(true|false),"display_url":"([^"]+)"/g;
+
+    const items = [];
+    const seenUrls = new Set();
+    let match;
+    while ((match = nodeRegex.exec(htmlContent)) !== null) {
+        const isVideo = match[2] === 'true';
+        const thumb = cleanInstagramUrl(match[3]);
+        if (!isValidSidecarImageUrl(thumb) || seenUrls.has(thumb)) continue;
+        seenUrls.add(thumb);
+
+        const item = { type: isVideo ? 'video' : 'photo', thumb };
+        if (isVideo) {
+            // video_url lives in the same node after display_url. Search up to
+            // the NEXT node boundary instead of a fixed window — large video
+            // metadata (e.g. dash manifests) can push video_url far away.
+            const searchStart = match.index + match[0].length;
+            const rest = htmlContent.slice(searchStart);
+            let nodeEnd = rest.search(/"shortcode":"|"is_video":/);
+            if (nodeEnd === -1) nodeEnd = rest.length;
+            const videoMatch = rest.slice(0, nodeEnd).match(/"video_url":"([^"]+)"/);
+            const videoUrl = videoMatch ? cleanInstagramUrl(videoMatch[1]) : null;
+            if (!videoUrl || !(videoUrl.includes('cdninstagram.com') || videoUrl.includes('fbcdn.net'))) continue;
+            item.url = videoUrl;
+        } else {
+            item.url = thumb;
+        }
+        items.push(item);
+    }
+    return items;
+}
+
+// Full extraction used by every HTML-scraping strategy: prefer the ordered
+// sidecar slides, fall back to the legacy single-image heuristics.
+function extractAllImages(rawHtmlContent) {
+    const sidecarItems = parseSidecarImages(rawHtmlContent);
+    if (sidecarItems.length > 0) return sidecarItems;
+
+    const legacyUrl = extractInstagramImage(rawHtmlContent);
+    return legacyUrl ? [{ type: 'photo', thumb: legacyUrl, url: legacyUrl }] : [];
+}
+
+
 function getShortcode(url) {
     if (!url) return null;
     url = url.trim();
@@ -149,16 +225,37 @@ function getProxiedImageUrl(imageUrl, winningProxy) {
         return `https://corsproxy.io/?url=${encodeURIComponent(imageUrl)}`;
     } else if (winningProxy === 'Codetabs' || winningProxy === 'Codetabs HTML') {
         return `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(imageUrl)}`;
+    } else if (winningProxy === 'OwnWorker HTML') {
+        // Instagram CDN URLs signed by our worker's embed are hotlinkable AND
+        // CORS-open (verified live: ACAO * on both image/webp and video/mp4),
+        // so they work directly in <img>, <video>, fetch() and canvas export.
+        return imageUrl;
     }
     // Fallback: try allorigins first, then corsproxy
     return `https://api.allorigins.win/raw?url=${encodeURIComponent(imageUrl)}`;
 }
 
+
+// Turns a raw race result into the normalized { items, winningProxy, coverOnly }
+// shape consumed by the UI layer, wrapping cover-only blobs as a 1-slide list.
+function normalizeResult(result) {
+    if (result.items && result.items.length > 0) {
+        return { items: result.items, winningProxy: result.proxyName, coverOnly: !!result.coverOnly };
+    }
+    return {
+        items: [{ type: 'photo', thumb: result.coverBlobUrl, url: result.coverBlobUrl }],
+        winningProxy: result.proxyName,
+        coverOnly: true
+    };
+}
+
 async function getPostHtmlAndImage(shortcode) {
     const targetUrl = `https://www.instagram.com/p/${shortcode}/embed/`;
     const mediaUrl = `https://www.instagram.com/p/${shortcode}/media?size=l`;
-    
-    // Define the primary strategy: Weserv Media Direct (very fast, reliable, bypasses cookie wall)
+
+    // Primary strategy: Weserv Media Direct (very fast, reliable, bypasses
+    // cookie wall). It can only ever return the cover slide, so the result is
+    // flagged cover-only and the full carousel gets enumerated in background.
     const primaryPromise = (async () => {
         const startTime = Date.now();
         const proxyUrl = `https://images.weserv.nl/?url=${encodeURIComponent(mediaUrl)}`;
@@ -169,16 +266,17 @@ async function getPostHtmlAndImage(shortcode) {
             const latency = Date.now() - startTime;
             console.log(`[Proxy Success] Weserv Media Direct resolved in ${latency}ms`);
             const dataUrl = URL.createObjectURL(blob);
-            return { proxyName: 'Weserv Media', imageUrl: dataUrl };
+            return { proxyName: 'Weserv Media', coverBlobUrl: dataUrl, items: [], coverOnly: true };
         }
         throw new Error('Weserv Media did not return a valid image blob');
     })();
 
-    // Define the backup strategies: AllOrigins, CorsProxy, Codetabs
+    // Backup strategies: media endpoints resolve a cover-only slide list, the
+    // HTML scrapers parse the embed page and resolve the FULL ordered slides.
     const runBackupStrategies = () => {
         console.log('Weserv took longer than 600ms or failed. Launching backup parallel proxy race...');
         const backupPromises = [
-            // Strategy 2: Direct Media fetch via AllOrigins JSON
+            // Direct Media fetch via AllOrigins JSON (cover-only)
             new Promise(async (resolve, reject) => {
                 const startTime = Date.now();
                 try {
@@ -186,31 +284,33 @@ async function getPostHtmlAndImage(shortcode) {
                     const res = await fetch(proxyUrl);
                     if (!res.ok) throw new Error(`Status ${res.status}`);
                     const json = await res.json();
-                    
+
+                    let coverUrl = null;
                     if (json && json.status && json.status.url) {
                         const cdnUrl = json.status.url;
                         if (cdnUrl.includes('cdninstagram.com') || cdnUrl.includes('fbcdn.net')) {
-                            const latency = Date.now() - startTime;
-                            console.log(`[Proxy Success] AllOrigins Media Direct resolved CDN URL in ${latency}ms: ${cdnUrl}`);
-                            resolve({ proxyName: 'AllOrigins Media', imageUrl: cdnUrl });
-                            return;
+                            coverUrl = cdnUrl;
                         }
                     }
-                    
-                    if (json && json.contents && json.contents.startsWith('data:image/')) {
-                        const latency = Date.now() - startTime;
-                        console.log(`[Proxy Success] AllOrigins Media Direct data URL responded in ${latency}ms`);
-                        resolve({ proxyName: 'AllOrigins Media', imageUrl: json.contents });
-                        return;
+                    if (!coverUrl && json && json.contents && json.contents.startsWith('data:image/')) {
+                        coverUrl = json.contents;
                     }
-                    throw new Error('AllOrigins Media did not return image data');
+                    if (!coverUrl) throw new Error('AllOrigins Media did not return image data');
+
+                    const latency = Date.now() - startTime;
+                    console.log(`[Proxy Success] AllOrigins Media Direct resolved in ${latency}ms`);
+                    resolve({
+                        proxyName: 'AllOrigins Media',
+                        items: [{ type: 'photo', thumb: coverUrl, url: coverUrl }],
+                        coverOnly: true
+                    });
                 } catch (e) {
                     console.warn(`[Proxy Error] AllOrigins Media failed: ${e.message}`);
                     reject(e);
                 }
             }),
 
-            // Strategy 3: Direct Media fetch via AllOrigins Raw
+            // Direct Media fetch via AllOrigins Raw (cover-only)
             new Promise(async (resolve, reject) => {
                 const startTime = Date.now();
                 try {
@@ -222,7 +322,11 @@ async function getPostHtmlAndImage(shortcode) {
                         const latency = Date.now() - startTime;
                         console.log(`[Proxy Success] AllOrigins Raw Media responded in ${latency}ms`);
                         const dataUrl = URL.createObjectURL(blob);
-                        resolve({ proxyName: 'AllOrigins Raw Media', imageUrl: dataUrl });
+                        resolve({
+                            proxyName: 'AllOrigins Raw Media',
+                            items: [{ type: 'photo', thumb: dataUrl, url: dataUrl }],
+                            coverOnly: true
+                        });
                         return;
                     }
                     throw new Error('AllOrigins Raw Media did not return a valid image blob');
@@ -232,23 +336,18 @@ async function getPostHtmlAndImage(shortcode) {
                 }
             }),
 
-            // Strategy 4: Race other proxies for the embed HTML page
-            ...[
-                { name: 'AllOrigins Raw HTML', url: `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`, isAllOrigins: false },
-                { name: 'CorsProxy.io HTML',   url: `https://corsproxy.io/?url=${encodeURIComponent(targetUrl)}`,           isAllOrigins: false },
-                { name: 'AllOrigins Get HTML', url: `https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`,   isAllOrigins: true  },
-                { name: 'Codetabs HTML',       url: `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`, isAllOrigins: false }
-            ].map(proxy => {
+            // Race other proxies for the embed HTML page (full slide list)
+            ...embedHtmlProxyConfigs(targetUrl, shortcode).map(proxy => {
                 return new Promise(async (resolve, reject) => {
                     const startTime = Date.now();
                     try {
                         const html = await fetchFromProxy(proxy.url, proxy.isAllOrigins);
                         if (html && html.trim().length > 0) {
-                            const imageUrl = extractInstagramImage(html);
-                            if (imageUrl) {
+                            const items = extractAllImages(html);
+                            if (items.length > 0) {
                                 const latency = Date.now() - startTime;
-                                console.log(`[Proxy Success] ${proxy.name} responded in ${latency}ms`);
-                                resolve({ proxyName: proxy.name, imageUrl });
+                                console.log(`[Proxy Success] ${proxy.name} responded in ${latency}ms${items.length > 1 ? ` (${items.length} slides)` : ''}`);
+                                resolve({ proxyName: proxy.name, items, coverOnly: false });
                                 return;
                             }
                         }
@@ -274,13 +373,13 @@ async function getPostHtmlAndImage(shortcode) {
 
     try {
         const result = await Promise.race([primaryPromise, timeoutPromise]);
-        return { imageUrl: result.imageUrl, winningProxy: result.proxyName };
+        return normalizeResult(result);
     } catch (err) {
         if (err.message === 'Primary timeout') {
             const backupPromiseObj = runBackupStrategies();
             try {
                 const result = await promiseAny([primaryPromise, backupPromiseObj]);
-                return { imageUrl: result.imageUrl, winningProxy: result.proxyName };
+                return normalizeResult(result);
             } catch (backupErr) {
                 console.error("All proxies failed (including backups):", backupErr.errors);
                 throw new Error("Could not retrieve image content. Please verify the link is correct and try again.");
@@ -289,7 +388,7 @@ async function getPostHtmlAndImage(shortcode) {
             console.warn(`[Proxy Warning] Primary Weserv failed immediately: ${err.message}`);
             try {
                 const result = await runBackupStrategies();
-                return { imageUrl: result.imageUrl, winningProxy: result.proxyName };
+                return normalizeResult(result);
             } catch (backupErr) {
                 console.error("All proxies failed:", backupErr.errors);
                 throw new Error("Could not retrieve image content. Please verify the link is correct and try again.");
@@ -299,12 +398,352 @@ async function getPostHtmlAndImage(shortcode) {
 }
 
 // Global state variables
-let extractedCdnUrl = null;
+let galleryItems = [];            // ordered slides of the current post (photos + videos)
+let selectedIndex = 0;            // slide currently shown in the main viewer
 let winningProxyName = null;
 let currentShortcode = null;
-let extractedBlobUrl = null;  // Pre-fetched image blob URL for instant download
+const imageBlobCache = new Map(); // item.url -> pre-fetched blob URL for instant downloads
+
+// Shared inline icon markup so buttons, tray thumbnails and bulk button all
+// reuse one definition.
+const DOWNLOAD_ARROW_SVG = `
+    <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+    </svg>`;
+const DOWNLOAD_ARROW_MINI_SVG = '<svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>';
+
+function setDownloadReadyLabel(label = 'DOWNLOAD PHOTO') {
+    const btn = document.getElementById('download-btn');
+    if (!btn) return;
+    btn.disabled = false;
+    btn.innerHTML = `${DOWNLOAD_ARROW_SVG}
+        <span>${label}</span>`;
+}
+
+function setDownloadButtonLoading(label = 'Resolving Download Link...') {
+    const btn = document.getElementById('download-btn');
+    if (!btn) return;
+    btn.disabled = true;
+    btn.innerHTML = `
+        <svg class="animate-spin -ml-1 mr-2 h-5 w-5 text-white inline-block" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+        <span>${label}</span>
+    `;
+}
+
+function revokeAllCachedBlobs() {
+    for (const blobUrl of imageBlobCache.values()) URL.revokeObjectURL(blobUrl);
+    imageBlobCache.clear();
+}
+
+// ── Self-hosted Instagram relay (see worker/README.md) ─────────────────────
+// Deploy worker/ig-embed-worker.js to Cloudflare (free, ~5 minutes) and paste
+// your worker URL below. When set, it becomes the PRIMARY slide source and all
+// volunteer proxies are kept as automatic fallbacks. Empty = app acts exactly
+// as before.
+const OWN_WORKER_BASE = ''; // self-hosted relay (deploy steps: worker/README.md) — paste YOUR worker URL here
+
+// The HTML-scraping proxies, shared by the backup race and carousel enrichment.
+function embedHtmlProxyConfigs(targetUrl, shortcode) {
+    const configs = [
+        { name: 'AllOrigins Raw HTML', url: `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`, isAllOrigins: false },
+        { name: 'CorsProxy.io HTML',   url: `https://corsproxy.io/?url=${encodeURIComponent(targetUrl)}`,           isAllOrigins: false },
+        { name: 'AllOrigins Get HTML', url: `https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`,   isAllOrigins: true  },
+        { name: 'Codetabs HTML',       url: `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`, isAllOrigins: false }
+    ];
+    if (OWN_WORKER_BASE) {
+        // Yours goes first: fast, cached per post, immune to volunteer outages.
+        configs.unshift({
+            name: 'OwnWorker HTML',
+            url: `${OWN_WORKER_BASE}/?shortcode=${encodeURIComponent(shortcode || '')}`,
+            isAllOrigins: false
+        });
+    }
+    return configs;
+}
+
+// ── Carousel gallery UI ────────────────────────────────────────────────────
+
+// Show/hide tray, arrows, counter and the bulk button. Single-slide posts keep
+// the exact pre-carousel UI, with no extra chrome at all.
+function setGalleryChrome(slideCount) {
+    const multi = slideCount > 1;
+
+    const tray = document.getElementById('gallery-tray');
+    if (tray) tray.classList.toggle('hidden', !multi);
+
+    ['carousel-prev', 'carousel-next', 'carousel-counter'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.classList.toggle('hidden', !multi);
+    });
+
+    const allBtn = document.getElementById('download-all-btn');
+    if (allBtn) {
+        allBtn.classList.toggle('hidden', !multi);
+        allBtn.disabled = false;
+        if (multi) {
+            allBtn.innerHTML = `${DOWNLOAD_ARROW_SVG}
+                <span>DOWNLOAD ALL (${slideCount})</span>`;
+        }
+    }
+}
+
+function renderGallery() {
+    const thumbs = document.getElementById('gallery-thumbs');
+    setGalleryChrome(galleryItems.length);
+    if (!thumbs || galleryItems.length <= 1) return;
+
+    thumbs.innerHTML = galleryItems.map((item, index) => {
+        const selected = index === selectedIndex;
+        const borderClass = selected ? 'border-instagram-magenta' : 'border-instagram-border hover:border-gray-400';
+        const thumbSrc = getProxiedImageUrl(item.thumb, winningProxyName);
+        // Video slides get a play badge; EVERY slide carries its own mini
+        // download button, honoring "separate button per image".
+        const badge = item.type === 'video' ? `
+            <span class="absolute bottom-1 left-1 bg-instagram-dark/80 rounded-full p-1">
+                <svg class="h-3 w-3 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+            </span>` : '';
+        const miniDownload = `
+            <span role="button" title="Download slide ${index + 1}" class="absolute bottom-1 right-1 bg-instagram-dark/80 hover:bg-instagram-magenta rounded-full p-1 cursor-pointer transition-colors duration-200" onclick="event.stopPropagation(); downloadItem(${index})">
+                ${DOWNLOAD_ARROW_MINI_SVG}
+            </span>`;
+        return `<button type="button" onclick="selectImage(${index})" title="Slide ${index + 1}" class="relative shrink-0 w-16 h-16 rounded-lg overflow-hidden border-2 ${borderClass} transition-all duration-200 focus:outline-none">
+            <img src="${thumbSrc}" alt="Slide ${index + 1}" class="w-full h-full object-cover" loading="lazy" />${badge}${miniDownload}
+        </button>`;
+    }).join('');
+
+    updateCarouselCounter();
+}
+
+function updateCarouselCounter() {
+    const counter = document.getElementById('carousel-counter');
+    if (!counter || galleryItems.length === 0) return;
+    counter.textContent = `${selectedIndex + 1}/${galleryItems.length}`;
+}
+
+function stepCarousel(delta) {
+    if (galleryItems.length === 0) return;
+    selectImage(selectedIndex + delta);
+}
+
+function selectImage(index) {
+    if (galleryItems.length === 0) return;
+    selectedIndex = ((index % galleryItems.length) + galleryItems.length) % galleryItems.length;
+    const item = galleryItems[selectedIndex];
+
+    updateCarouselCounter();
+
+    // Refresh the selected-thumbnail highlight without re-rendering images
+    document.querySelectorAll('#gallery-thumbs > button').forEach((el, i) => {
+        el.classList.toggle('border-instagram-magenta', i === selectedIndex);
+        el.classList.toggle('border-instagram-border', i !== selectedIndex);
+    });
+
+    showItem(item);
+    setDownloadReadyLabel(item.type === 'video' ? 'DOWNLOAD VIDEO (.MP4)' : 'DOWNLOAD PHOTO');
+    if (item.type === 'photo') prefetchItem(item);
+}
+
+// Puts one slide into the main viewer: <img> for photos, <video> for videos.
+// The embed iframe is always the reliable cross-origin fallback underneath.
+function showItem(item) {
+    const imgPreview   = document.getElementById('imgpreview');
+    const embedIframe  = document.getElementById('embed-iframe');
+    const previewLoader = document.getElementById('preview-loader');
+    const wantedIndex = selectedIndex;
+    const startShortcode = currentShortcode;
+
+    if (item.type === 'video') {
+        if (imgPreview) { imgPreview.classList.add('hidden'); imgPreview.removeAttribute('src'); }
+        if (embedIframe) embedIframe.classList.add('hidden');
+        setVideoPreviewActive(item, wantedIndex, startShortcode);
+        return;
+    }
+
+    clearVideoPreview();
+    if (!imgPreview) return;
+
+    imgPreview.onload = () => {
+        if (currentShortcode !== startShortcode || selectedIndex !== wantedIndex) return;
+        if (previewLoader) previewLoader.classList.add('hidden');
+        imgPreview.classList.remove('hidden');
+        if (embedIframe) embedIframe.classList.add('hidden');
+    };
+    imgPreview.onerror = () => {
+        if (currentShortcode !== startShortcode) return;
+        if (previewLoader) previewLoader.classList.add('hidden');
+        // The resolved image failed to load (expired CDN signature, hotlink
+        // block) — fall back to the native iframe embed, mirroring the video
+        // path, so the viewer is never left blank.
+        if (embedIframe) {
+            embedIframe.classList.remove('hidden');
+            embedIframe.src = `https://www.instagram.com/p/${startShortcode}/embed/`;
+        }
+    };
+    imgPreview.src = getProxiedImageUrl(item.thumb, winningProxyName);
+}
+
+function setVideoPreviewActive(item, wantedIndex, startShortcode) {
+    const videoEl = document.getElementById('video-preview');
+    if (!videoEl) return;
+
+    const previewLoader = document.getElementById('preview-loader');
+    const embedIframe = document.getElementById('embed-iframe');
+
+    videoEl.onerror = () => {
+        if (currentShortcode !== startShortcode || selectedIndex !== wantedIndex) return;
+        console.warn('[Preview] Proxied video failed to load; falling back to the embed iframe');
+        clearVideoPreview();
+        if (embedIframe) {
+            embedIframe.classList.remove('hidden');
+            embedIframe.src = `https://www.instagram.com/p/${startShortcode}/embed/`;
+        }
+        if (previewLoader) previewLoader.classList.add('hidden');
+    };
+    videoEl.onloadeddata = () => {
+        if (currentShortcode !== startShortcode || selectedIndex !== wantedIndex) return;
+        if (previewLoader) previewLoader.classList.add('hidden');
+    };
+
+    videoEl.src = getProxiedImageUrl(item.url, winningProxyName);
+    videoEl.classList.remove('hidden');
+
+    // Cross-origin <video> may never fire loadeddata reliably — mirror the
+    // iframe pattern and hide the loader after a 3s grace period.
+    setTimeout(() => {
+        if (currentShortcode === startShortcode && selectedIndex === wantedIndex && previewLoader) {
+            previewLoader.classList.add('hidden');
+        }
+    }, 3000);
+}
+
+function clearVideoPreview() {
+    const videoEl = document.getElementById('video-preview');
+    if (!videoEl) return;
+    videoEl.onerror = null;
+    videoEl.onloadeddata = null;
+    videoEl.pause();
+    videoEl.removeAttribute('src');
+    videoEl.load(); // flush any buffered media for the removed src
+    videoEl.classList.add('hidden');
+}
+
+// Shared "get me the bytes" helper: abort-timed fetch that rejects on a bad
+// status or a suspiciously small payload. Preview prefetching and the download
+// strategies share the same contract, so the timeout/ok/size logic lives here.
+async function fetchBlobWithTimeout(url, timeoutMs) {
+    const controller = new AbortController();
+    const tid = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        const res = await fetch(url, { signal: controller.signal });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const blob = await res.blob();
+        if (blob.size < 2048) throw new Error(`Too small (${blob.size}B)`);
+        return blob;
+    } finally {
+        clearTimeout(tid);
+    }
+}
+
+// Pre-fetch the big blob NOW while the user is looking at the preview, so the
+// Download click is instant. Videos are not pre-fetched (they are large).
+function prefetchItem(item) {
+    if (imageBlobCache.has(item.url)) return;
+    if (item.url.startsWith('data:') || item.url.startsWith('blob:')) {
+        imageBlobCache.set(item.url, item.url);
+        console.log('[Cache] Slide is already a data/blob URL, skipping pre-fetch');
+        return;
+    }
+
+    const proxiedImgUrl = getProxiedImageUrl(item.url, winningProxyName);
+    const shortcodeAtStart = currentShortcode;
+    (async () => {
+        try {
+            const blob = await fetchBlobWithTimeout(proxiedImgUrl, 15000);
+            // Accept the cache entry only while the user still wants this post
+            if (currentShortcode === shortcodeAtStart) {
+                const extMatch = item.url.match(/\.(jpg|jpeg|png|webp)/i);
+                const mime = (extMatch && extMatch[1].toLowerCase() === 'png') ? 'image/png' : 'image/jpeg';
+                const finalBlob = blob.type.startsWith('image/')
+                    ? blob
+                    : new Blob([blob], { type: mime });
+                imageBlobCache.set(item.url, URL.createObjectURL(finalBlob));
+                console.log(`[Pre-fetch] Image blob cached (${Math.round(finalBlob.size / 1024)}KB, type: ${finalBlob.type})`);
+            }
+        } catch (e) {
+            console.warn('[Pre-fetch] Could not pre-cache blob:', e.message);
+        }
+    })();
+}
+
+// Background enumeration for posts where a media endpoint could only resolve
+// the cover image. Races the HTML-scraping proxies and returns the slide list
+// only when strictly more slides were found.
+async function enrichCarouselItems(shortcode, knownCount) {
+    const targetUrl = `https://www.instagram.com/p/${shortcode}/embed/`;
+
+    const attemptScrape = async () => {
+        return await promiseAny(embedHtmlProxyConfigs(targetUrl, shortcode).map(proxy => {
+            return new Promise(async (resolve, reject) => {
+                try {
+                    const html = await fetchFromProxy(proxy.url, proxy.isAllOrigins, 10000);
+                    if (html && html.trim().length > 0) {
+                        const items = extractAllImages(html);
+                        if (items.length > 0) {
+                            resolve({ items, proxyName: proxy.name });
+                            return;
+                        }
+                    }
+                    reject(new Error(`${proxy.name}: no slides parseable`));
+                } catch (e) {
+                    reject(e);
+                }
+            });
+        }));
+    };
+
+    // A SUCCESSFUL scrape is ground truth for the post's slide list — if it
+    // reports the same count as the cover-only result, retrying cannot add
+    // slides, so stop immediately. Retries only pay off when ALL scrapers
+    // failed (transient upstream outage, e.g. an echo of a 522).
+    for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+            const scraped = await attemptScrape();
+            if (scraped.items.length > knownCount) {
+                console.log(`[Carousel] Enrichment via ${scraped.proxyName}: ${scraped.items.length} slides total`);
+                // Slides now come from the scraping proxy — keep URL-proxy
+                // bookkeeping truthful so previews route through the right source.
+                winningProxyName = scraped.proxyName;
+                return scraped.items;
+            }
+            console.log(`[Carousel] Enrichment scrape (${scraped.proxyName}) agrees with ${knownCount} slide(s); no upgrade`);
+            return null;
+        } catch (e) {
+            if (attempt < 2) {
+                console.warn('[Carousel] Enrichment pass 1 failed; retrying once in 3s');
+                await new Promise(resolve => setTimeout(resolve, 3000));
+            }
+        }
+    }
+    console.warn('[Carousel] Enrichment unavailable; keeping the resolved cover');
+    return null;
+}
+
+// The URL-entry row only matters before a post is resolved; the result card
+// with START OVER owns the screen afterward.
+function setUrlEntryVisible(visible) {
+    const form = document.getElementById('form-container');
+    if (form) form.classList.toggle('hidden', !visible);
+}
 
 async function fetchInstaPhoto() {
+    if (!navigator.onLine) {
+        showError('You appear to be offline. Check your connection and try again.');
+        return;
+    }
+
     const urlInput = document.getElementById('instalink').value.trim();
     if (!urlInput) {
         showError('Please enter an Instagram post URL.');
@@ -321,9 +760,12 @@ async function fetchInstaPhoto() {
 
     // Reset previous states
     hideError();
-    extractedCdnUrl = null;
+    setGalleryChrome(0);
+    clearVideoPreview();
+    galleryItems = [];
+    selectedIndex = 0;
     winningProxyName = null;
-    if (extractedBlobUrl) { URL.revokeObjectURL(extractedBlobUrl); extractedBlobUrl = null; }
+    revokeAllCachedBlobs();
 
     const imgPreview   = document.getElementById('imgpreview');
     const embedIframe  = document.getElementById('embed-iframe');
@@ -342,7 +784,7 @@ async function fetchInstaPhoto() {
     if (embedIframe) {
         embedIframe.classList.remove('hidden');
         embedIframe.src = embedUrl;
-        
+
         // Hide spinner/loader after a short timeout because cross-origin iframes 
         // may not trigger onload reliably in all browser configurations.
         setTimeout(() => {
@@ -361,84 +803,34 @@ async function fetchInstaPhoto() {
     // Scroll to result
     document.getElementById('result-section').scrollIntoView({ behavior: 'smooth' });
 
-    // ── STEP 2: Try CORS proxies in background for direct downloadable CDN URL ──
-    const downloadBtn = document.getElementById('download-btn');
-    if (downloadBtn) {
-        downloadBtn.disabled = true;
-        downloadBtn.innerHTML = `
-            <svg class="animate-spin -ml-1 mr-2 h-5 w-5 text-white inline-block" fill="none" viewBox="0 0 24 24">
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-            </svg>
-            <span>Resolving Download Link...</span>
-        `;
-    }
+    // ── STEP 2: Try CORS proxies in background for direct downloadable CDN URLs ──
+    setDownloadButtonLoading();
 
     try {
-        const { imageUrl, winningProxy } = await getPostHtmlAndImage(shortcode);
+        const { items, winningProxy, coverOnly } = await getPostHtmlAndImage(shortcode);
 
         // Guard against stale responses if user typed a new URL
         if (currentShortcode !== shortcode) return;
 
-        extractedCdnUrl = imageUrl;
+        galleryItems = items;
         winningProxyName = winningProxy;
-        const proxiedImgUrl = getProxiedImageUrl(imageUrl, winningProxyName);
+        console.log(`[Carousel] Resolved ${items.length} slide(s) via ${winningProxy}`);
 
-        // Show direct img preview on top of (or instead of) iframe
-        if (imgPreview) {
-            imgPreview.onload = () => {
-                if (currentShortcode !== shortcode) return;
-                if (previewLoader) previewLoader.classList.add('hidden');
-                imgPreview.classList.remove('hidden');
-                if (embedIframe) embedIframe.classList.add('hidden');
-            };
-            imgPreview.onerror = () => {
-                if (previewLoader) previewLoader.classList.add('hidden');
-            };
-            imgPreview.src = proxiedImgUrl;
-        }
+        renderGallery();
+        selectImage(0);
+        setUrlEntryVisible(false);
 
-        // ── Pre-fetch the image blob NOW while user sees the preview ──
-        // This means the blob is ready instantly when they click Download.
-        // ── Pre-fetch the image blob NOW while user sees the preview ──
-        // This means the blob is ready instantly when they click Download.
-        if (imageUrl.startsWith('data:') || imageUrl.startsWith('blob:')) {
-            extractedBlobUrl = imageUrl;
-            console.log('[Cache] Image is already data/blob URL, skipping pre-fetch');
-        } else {
-            (async () => {
-                try {
-                    const controller = new AbortController();
-                    const tid = setTimeout(() => controller.abort(), 15000);
-                    const res = await fetch(proxiedImgUrl, { signal: controller.signal });
-                    clearTimeout(tid);
-                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                    const blob = await res.blob();
-                    // Only keep it if it looks like real image data
-                    if (blob.size > 2048 && currentShortcode === shortcode) {
-                        const extMatch = imageUrl.match(/\.(jpg|jpeg|png|webp)/i);
-                        const mime = (extMatch && extMatch[1].toLowerCase() === 'png') ? 'image/png' : 'image/jpeg';
-                        const finalBlob = blob.type.startsWith('image/')
-                            ? blob
-                            : new Blob([blob], { type: mime });
-                        extractedBlobUrl = URL.createObjectURL(finalBlob);
-                        console.log(`[Pre-fetch] Image blob cached (${Math.round(blob.size/1024)}KB, type: ${blob.type})`);
-                    }
-                } catch (e) {
-                    console.warn('[Pre-fetch] Could not pre-cache blob:', e.message);
-                }
-            })();
-        }
-
-        // Activate download button
-        if (downloadBtn) {
-            downloadBtn.disabled = false;
-            downloadBtn.innerHTML = `
-                <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                </svg>
-                <span>DOWNLOAD PHOTO</span>
-            `;
+        // Media endpoints can only ever resolve the cover slide — enumerate the
+        // full carousel in the background and upgrade the gallery if useful.
+        if (coverOnly) {
+            enrichCarouselItems(shortcode, items.length).then(enriched => {
+                if (!enriched || currentShortcode !== shortcode) return;
+                revokeAllCachedBlobs(); // cover blob and stale prefetches are gone
+                galleryItems = enriched;
+                console.log(`[Carousel] Upgraded gallery to ${enriched.length} slides after enrichment`);
+                renderGallery();
+                selectImage(selectedIndex);
+            });
         }
 
     } catch (err) {
@@ -447,41 +839,52 @@ async function fetchInstaPhoto() {
         console.warn('Direct link extraction failed (all proxies blocked):', err.message);
 
         if (previewLoader) previewLoader.classList.add('hidden');
+        // The page still degrades to the embed + media URL — tell the user what
+        // degraded instead of silently changing behavior.
+        showError('Could not resolve the direct media link through any proxy — showing the Instagram embed instead. Downloads will open the original file in a new tab.');
 
-        // Fallback to the media endpoint without trailing slash (to prevent cookie-based 404 redirects)
-        extractedCdnUrl = `https://www.instagram.com/p/${shortcode}/media?size=l`;
-
-        if (downloadBtn) {
-            downloadBtn.disabled = false;
-            downloadBtn.innerHTML = `
-                <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                </svg>
-                <span>DOWNLOAD PHOTO</span>
-            `;
-        }
+        // Fallback to the media endpoint without trailing slash (to prevent
+        // cookie-based 404 redirects). No tray chrome: the embed iframe stays
+        // as the preview and downloads open the URL in a new tab.
+        galleryItems = [{
+            type: 'photo',
+            thumb: `https://www.instagram.com/p/${shortcode}/media?size=l`,
+            url: `https://www.instagram.com/p/${shortcode}/media?size=l`
+        }];
+        selectedIndex = 0;
+        setDownloadReadyLabel();
+        setUrlEntryVisible(false); // a degraded result is still a result — START OVER owns the screen now
     }
 }
 
 
 async function downloadPhoto() {
-    if (!extractedCdnUrl) return;
+    // Main download button always targets the slide shown in the viewer.
+    await downloadItem(selectedIndex);
+}
+
+// Downloads one slide. Returns true when a download was triggered; false when
+// it had to fall back to opening the URL in the download helper tab.
+async function downloadItem(index, { silent = false } = {}) {
+    const item = galleryItems[index];
+    if (!item) return false;
 
     const downloadBtn = document.getElementById('download-btn');
-    const originalHTML = downloadBtn.innerHTML;
 
-    // If proxy race failed, open the post page in a new tab synchronously (to prevent popup block)
+    // If the proxy race never resolved, the media URL can't be fetched
+    // cross-origin — open it in a tab synchronously instead.
     if (!winningProxyName) {
-        console.info('[Download] Proxy race failed. Opening post URL in new tab.');
-        window.open(extractedCdnUrl, '_blank');
-        return;
+        console.info('[Download] Proxy race failed. Opening media URL in new tab.');
+        window.open(item.url, '_blank');
+        return false;
     }
 
-    // ── Strategy 1: Use the pre-fetched blob (available if proxy worked during preview load) ──
-    const extMatch = extractedCdnUrl.match(/\.(jpg|jpeg|png|webp)/i);
-    const ext = extMatch ? extMatch[1].toLowerCase() : 'jpg';
-    const filename = `instagram_${currentShortcode}.${ext}`;
-    const mimeType = ext === 'png' ? 'image/png' : 'image/jpeg';
+    const extMatch = item.url.match(/\.(jpg|jpeg|png|webp)/i);
+    const ext = item.type === 'video' ? 'mp4' : (extMatch ? extMatch[1].toLowerCase() : 'jpg');
+    const mimeType = item.type === 'video' ? 'video/mp4' : (ext === 'png' ? 'image/png' : 'image/jpeg');
+    const filename = galleryItems.length > 1
+        ? `instagram_${currentShortcode}_${index + 1}.${ext}`
+        : `instagram_${currentShortcode}.${ext}`;
 
     function triggerUrlDownload(url, name) {
         const a = document.createElement('a');
@@ -492,28 +895,91 @@ async function downloadPhoto() {
         document.body.removeChild(a);
     }
 
-    if (extractedBlobUrl) {
+    // ── Strategy 1: use the pre-fetched blob (cached while previewing) ──
+    if (imageBlobCache.has(item.url)) {
         console.log('[Download] Using pre-fetched blob URL \u2192 instant download');
-        triggerUrlDownload(extractedBlobUrl, filename);
-        return;
+        triggerUrlDownload(imageBlobCache.get(item.url), filename);
+        return true;
     }
 
-    // If no pre-fetch is ready, we must open a blank window synchronously *before* the async work 
-    // to bypass the browser's popup blocker.
-    console.log('[Download] No pre-fetch available. Opening helper tab and starting download...');
-    const helperTab = window.open('about:blank', '_blank');
+    // Open the helper tab synchronously *before* the async work to bypass the
+    // browser's popup blocker — only for direct (non-bulk) user interactions.
+    let helperTab = null;
+    if (!silent) {
+        console.log('[Download] No pre-fetch available. Opening helper tab and starting download...');
+        helperTab = window.open('about:blank', '_blank');
+        if (downloadBtn) {
+            downloadBtn.disabled = true;
+            downloadBtn.innerHTML = `
+                <svg class="animate-spin -ml-1 mr-2 h-5 w-5 text-white inline-block" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg> Downloading...
+            `;
+        }
+    }
 
-    downloadBtn.disabled = true;
-    downloadBtn.innerHTML = `
-        <svg class="animate-spin -ml-1 mr-2 h-5 w-5 text-white inline-block" fill="none" viewBox="0 0 24 24">
-            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-        </svg> Downloading...
-    `;
+    // ── Strategy 2: canvas export from the rendered preview (photos only) ──
+    if (item.type === 'photo') {
+        const canvasSuccess = await tryCanvasExport(item, triggerUrlDownload, filename, mimeType);
+        if (canvasSuccess) {
+            console.log('[Download] Canvas export succeeded.');
+            if (helperTab) helperTab.close();
+            if (!silent) setDownloadReadyLabel(galleryItems[selectedIndex].type === 'video' ? 'DOWNLOAD VIDEO (.MP4)' : 'DOWNLOAD PHOTO');
+            return true;
+        }
+    }
 
-    // ── Strategy 2: Canvas export from the already-rendered img element ──
-    const imgEl = document.getElementById('imgpreview');
-    const canvasSuccess = await new Promise(resolve => {
+    // ── Strategy 3: fresh proxy fetch (videos get a longer timeout) ──
+    const proxyList = [
+        getProxiedImageUrl(item.url, winningProxyName),
+        `https://api.allorigins.win/raw?url=${encodeURIComponent(item.url)}`,
+        `https://corsproxy.io/?url=${encodeURIComponent(item.url)}`,
+    ].filter((v, i, a) => v && a.indexOf(v) === i);
+
+    let downloaded = false;
+    const timeoutMs = item.type === 'video' ? 30000 : 8000;
+    for (const proxyUrl of proxyList) {
+        try {
+            const blob = await fetchBlobWithTimeout(proxyUrl, timeoutMs);
+            const finalBlob = (blob.type.startsWith('image/') || blob.type.startsWith('video/'))
+                ? blob
+                : new Blob([blob], { type: mimeType });
+            const blobUrl = URL.createObjectURL(finalBlob);
+            triggerUrlDownload(blobUrl, filename);
+            setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
+            downloaded = true;
+            console.log(`[Download] Fetched via proxy: ${proxyUrl}`);
+            break;
+        } catch (e) {
+            console.warn(`[Download] Proxy failed (${proxyUrl}):`, e.message);
+        }
+    }
+
+    // ── Strategy 4: fall back to opening target in the helper tab ──
+    if (downloaded) {
+        if (helperTab) helperTab.close();
+    } else if (!silent) {
+        console.info('[Download] All download strategies failed. Directing helper tab to target URL.');
+        if (helperTab) {
+            helperTab.location.href = item.url;
+        } else {
+            window.open(item.url, '_blank');
+        }
+    } else {
+        console.warn(`[Download All] Slide ${index + 1}: all download strategies failed.`);
+    }
+
+    if (!silent) {
+        setDownloadReadyLabel(galleryItems[selectedIndex].type === 'video' ? 'DOWNLOAD VIDEO (.MP4)' : 'DOWNLOAD PHOTO');
+    }
+    return downloaded;
+}
+
+// Canvas re-export: draw the resolved image into a canvas and save that as the
+// file. Works even when cross-origin saves are blocked, but only for photos.
+function tryCanvasExport(item, triggerUrlDownload, filename, mimeType) {
+    return new Promise(resolve => {
         try {
             const testImg = new Image();
             testImg.crossOrigin = 'anonymous';
@@ -539,66 +1005,66 @@ async function downloadPhoto() {
             };
             testImg.onerror = () => resolve(false);
             setTimeout(() => resolve(false), 8000);
-            testImg.src = imgEl && imgEl.src ? imgEl.src : '';
+            testImg.src = getProxiedImageUrl(item.url, winningProxyName);
         } catch (e) {
             resolve(false);
         }
     });
+}
 
-    if (canvasSuccess) {
-        console.log('[Download] Canvas export succeeded.');
-        if (helperTab) helperTab.close();
-        downloadBtn.disabled = false;
-        downloadBtn.innerHTML = originalHTML;
+// Downloads every slide of the current post, one after another.
+async function downloadAll() {
+    if (galleryItems.length === 0) return;
+
+    // Same proxy-less fallback as single downloads: open the media URL once.
+    if (!winningProxyName) {
+        console.info('[Download All] Proxy race failed. Opening media URL in new tab.');
+        window.open(galleryItems[0].url, '_blank');
         return;
     }
 
-    // ── Strategy 3: Fresh proxy fetch ──
-    const proxiedSrc = getProxiedImageUrl(extractedCdnUrl, winningProxyName);
-    const proxyList = [
-        proxiedSrc,
-        `https://api.allorigins.win/raw?url=${encodeURIComponent(extractedCdnUrl)}`,
-        `https://corsproxy.io/?url=${encodeURIComponent(extractedCdnUrl)}`,
-    ].filter((v, i, a) => v && a.indexOf(v) === i);
+    const allBtn = document.getElementById('download-all-btn');
+    const originalHTML = allBtn ? allBtn.innerHTML : '';
+    const total = galleryItems.length;
+    let succeeded = 0;
 
-    let downloaded = false;
-    for (const proxyUrl of proxyList) {
+    for (let i = 0; i < total; i++) {
+        if (allBtn) {
+            allBtn.disabled = true;
+            allBtn.innerHTML = `
+                <svg class="animate-spin -ml-1 mr-2 h-5 w-5 text-white inline-block" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <span>DOWNLOADING ${i + 1}/${total}</span>
+            `;
+        }
         try {
-            const controller = new AbortController();
-            const tid = setTimeout(() => controller.abort(), 8000);
-            const res = await fetch(proxyUrl, { signal: controller.signal });
-            clearTimeout(tid);
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            const blob = await res.blob();
-            if (blob.size < 2048) throw new Error(`Too small (${blob.size}B)`);
-            const finalBlob = blob.type.startsWith('image/')
-                ? blob
-                : new Blob([blob], { type: mimeType });
-            const blobUrl = URL.createObjectURL(finalBlob);
-            triggerUrlDownload(blobUrl, filename);
-            setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
-            downloaded = true;
-            console.log(`[Download] Fetched via proxy: ${proxyUrl}`);
-            break;
+            const ok = await downloadItem(i, { silent: true });
+            if (ok) succeeded++;
         } catch (e) {
-            console.warn(`[Download] Proxy failed (${proxyUrl}):`, e.message);
+            // One bad slide must never strand the button in its loading state.
+            console.warn(`[Download All] Slide ${i + 1}: unexpected error:`, e.message);
         }
+        // Pause between downloads so the browser treats each one as its own
+        // "multiple downloads" event instead of dropping them.
+        await new Promise(resolve => setTimeout(resolve, 400));
     }
 
-    // ── Strategy 4: Fall back to opening target in the helper tab ──
-    if (downloaded) {
-        if (helperTab) helperTab.close();
-    } else {
-        console.info('[Download] All download strategies failed. Directing helper tab to target URL.');
-        if (helperTab) {
-            helperTab.location.href = extractedCdnUrl;
+    console.log(`[Download All] ${succeeded}/${total} slides downloaded`);
+    if (allBtn) {
+        if (succeeded < total) {
+            // Skipped slides surface as a brief count instead of being invisible.
+            allBtn.innerHTML = `<span>DONE ${succeeded}/${total}</span>`;
+            setTimeout(() => {
+                allBtn.disabled = false;
+                allBtn.innerHTML = originalHTML;
+            }, 2500);
         } else {
-            window.open(extractedCdnUrl, '_blank');
+            allBtn.disabled = false;
+            allBtn.innerHTML = originalHTML;
         }
     }
-
-    downloadBtn.disabled = false;
-    downloadBtn.innerHTML = originalHTML;
 }
 
 
@@ -620,7 +1086,8 @@ function showLoading(isLoading) {
 
 function showError(msg) {
     const errorEl = document.getElementById('error-message');
-    // Set text of error element
+    // Defensive: a future markup change must not crash the fetch flow.
+    if (!errorEl) return;
     errorEl.querySelector('span:last-child').textContent = msg;
     errorEl.classList.remove('hidden');
 }
@@ -633,7 +1100,7 @@ function hideError() {
 function resetApp() {
     document.getElementById('instalink').value = '';
     document.getElementById('result-section').classList.add('hidden');
-    
+
     const imgPreview = document.getElementById('imgpreview');
     if (imgPreview) {
         imgPreview.classList.add('hidden');
@@ -648,28 +1115,22 @@ function resetApp() {
         embedIframe.removeAttribute('src');
         embedIframe.onload = null;
     }
-    
+
     const previewLoader = document.getElementById('preview-loader');
     if (previewLoader) previewLoader.classList.add('hidden');
-    
 
-    
-    const downloadBtn = document.getElementById('download-btn');
-    if (downloadBtn) {
-        downloadBtn.disabled = false;
-        downloadBtn.innerHTML = `
-            <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-            </svg>
-            <span>DOWNLOAD PHOTO</span>
-        `;
-    }
-    
     hideError();
-    extractedCdnUrl = null;
+    setUrlEntryVisible(true);
+    setGalleryChrome(0);
+    clearVideoPreview();
+    galleryItems = [];
+    selectedIndex = 0;
     winningProxyName = null;
     currentShortcode = null;
-    if (extractedBlobUrl) { URL.revokeObjectURL(extractedBlobUrl); extractedBlobUrl = null; }
+    revokeAllCachedBlobs();
+    setDownloadReadyLabel();
+    const input = document.getElementById('instalink');
+    if (input) input.focus();
 }
 
 

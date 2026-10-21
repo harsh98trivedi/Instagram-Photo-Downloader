@@ -154,6 +154,8 @@
                 <div id="image-container" class="relative overflow-hidden rounded-xl border-2 border-instagram-border shadow-md w-full max-w-sm mb-7 bg-instagram-dark flex items-center justify-center min-h-[300px]">
                     <!-- Direct img preview (shown when CDN URL resolved) -->
                     <img id="imgpreview" class="hidden w-full h-auto object-contain rounded-xl max-h-[480px]" src="" alt="Instagram Image Preview" />
+                    <!-- Video slide preview (a carousel slide can be a video) -->
+                    <video id="video-preview" class="hidden w-full h-auto object-contain rounded-xl max-h-[480px]" controls playsinline preload="none"></video>
                     <!-- Iframe embed preview (shown immediately as reliable fallback, no CORS needed) -->
                     <iframe id="embed-iframe"
                         class="hidden w-full rounded-xl"
@@ -169,6 +171,26 @@
                         </svg>
                         <span class="text-xs text-gray-300 font-medium">Loading preview image...</span>
                     </div>
+
+                    <!-- Carousel controls (shown for multi-slide posts) -->
+                    <button id="carousel-prev" onclick="stepCarousel(-1)" title="Previous slide" aria-label="Previous slide"
+                        class="hidden absolute left-2 top-1/2 -translate-y-1/2 z-10 bg-instagram-dark/80 hover:bg-instagram-magenta rounded-full p-2 text-white transition-colors duration-200">
+                        <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
+                        </svg>
+                    </button>
+                    <button id="carousel-next" onclick="stepCarousel(1)" title="Next slide" aria-label="Next slide"
+                        class="hidden absolute right-2 top-1/2 -translate-y-1/2 z-10 bg-instagram-dark/80 hover:bg-instagram-magenta rounded-full p-2 text-white transition-colors duration-200">
+                        <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
+                        </svg>
+                    </button>
+                    <span id="carousel-counter" class="hidden absolute top-2 right-2 z-10 bg-instagram-dark/80 rounded-full px-2 py-0.5 text-xs font-medium text-gray-300 select-none">1/1</span>
+                </div>
+
+                <!-- Slide tray (visible for multi-slide posts; each slide carries its own download button) -->
+                <div id="gallery-tray" class="hidden w-full max-w-sm">
+                    <div id="gallery-thumbs" class="flex gap-2 overflow-x-auto pb-2"></div>
                 </div>
 
                 <!-- Action Buttons -->
@@ -179,6 +201,12 @@
                             <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                         </svg>
                         <span>DOWNLOAD PHOTO</span>
+                    </button>
+                    <button id="download-all-btn" onclick="downloadAll()" class="hidden rounded-xl w-full py-3.5 font-bold bg-instagram-bg border-2 border-instagram-magenta hover:bg-instagram-magenta active:scale-[0.98] shadow transition text-white tracking-wide text-lg focus:outline-none flex justify-center items-center space-x-2">
+                        <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                        </svg>
+                        <span>DOWNLOAD ALL</span>
                     </button>
                     <button id="reload-btn" onclick="resetApp()"
                         class="w-full py-3.5 rounded-xl font-semibold border-2 border-instagram-border hover:border-white hover:bg-instagram-bg transition text-white text-lg focus:outline-none bg-instagram-light">
@@ -226,7 +254,7 @@
     </footer>
 
     <!-- App Logic Scripts -->
-    <script src="js/instaimage.js?v=2.0.8"></script>
+    <script src="js/instaimage.js?v=2.1.5"></script>
     <script>
         // Trigger fetch on Enter key inside URL input
         document.getElementById('instalink').addEventListener('keydown', function (e) {
