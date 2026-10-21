@@ -453,7 +453,18 @@ const runtimeWorkerBase = (() => {
         return /^https:\/\/[a-z0-9.-]+([\/?].*)?$/i.test(fromUrl) ? fromUrl : '';
     } catch (e) { return ''; } // non-browser environment (no location): stay inert
 })();
-const effectiveWorkerBase = OWN_WORKER_BASE || runtimeWorkerBase;
+// config.js fallback: static hosting has no environment variables, so a
+// deployment may set window.IG_WORKER_URL in that file to arm the relay by
+// default on this site — no source edits, and the file ships inert upstream.
+const persistedWorkerBase = (() => {
+    try {
+        const fromConfig = typeof window !== 'undefined' && typeof window.IG_WORKER_URL === 'string' ? window.IG_WORKER_URL : '';
+        return /^https:\/\/[a-z0-9.-]+([\/?].*)?$/i.test(fromConfig) ? fromConfig : '';
+    } catch (e) { return ''; } // non-browser environment (no window): stay inert
+})();
+// Baked constant wins over live overrides; the ?worker= param (a deliberate
+// per-visit demo override) beats the site's config-file default.
+const effectiveWorkerBase = OWN_WORKER_BASE || runtimeWorkerBase || persistedWorkerBase;
 
 // The HTML-scraping proxies, shared by the backup race and carousel enrichment.
 function embedHtmlProxyConfigs(targetUrl, shortcode) {
