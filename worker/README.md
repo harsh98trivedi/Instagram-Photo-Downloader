@@ -6,7 +6,12 @@ image of a post — but only something that is NOT your browser can fetch it.
 Free volunteer proxies used to do that; nearly all are now broken or paid.
 
 This folder contains your own permanent middleman. Free tier: **100,000
-fetches/day, no credit card**, and each post is cached for an hour.
+fetches/day, no credit card**, and each post is kept in the Worker's memory
+cache for an hour, so repeat visitors are served instantly.
+
+**Quick demo without any code edit:** open your site with
+`?worker=<your-worker-url>` appended, e.g.
+`https://yoursite.github.io/Instagram-Photo-Downloader/?worker=https://ig-embed.you.workers.dev`
 
 ## Step by step
 

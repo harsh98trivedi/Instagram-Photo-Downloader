@@ -444,6 +444,16 @@ function revokeAllCachedBlobs() {
 // volunteer proxies are kept as automatic fallbacks. Empty = app acts exactly
 // as before.
 const OWN_WORKER_BASE = ''; // self-hosted relay (deploy steps: worker/README.md) — paste YOUR worker URL here
+// PR convention: the repo ships OWN_WORKER_BASE as ''. A deployment arms the
+// relay by pasting a URL above OR by opening the site with ?worker=<url> —
+// this runtime fallback reads it, enabling zero-code demos on any hosting.
+const runtimeWorkerBase = (() => {
+    try {
+        const fromUrl = new URLSearchParams(location.search).get('worker') || '';
+        return /^https:\/\/[a-z0-9.-]+([\/?].*)?$/i.test(fromUrl) ? fromUrl : '';
+    } catch (e) { return ''; } // non-browser environment (no location): stay inert
+})();
+const effectiveWorkerBase = OWN_WORKER_BASE || runtimeWorkerBase;
 
 // The HTML-scraping proxies, shared by the backup race and carousel enrichment.
 function embedHtmlProxyConfigs(targetUrl, shortcode) {
@@ -453,11 +463,11 @@ function embedHtmlProxyConfigs(targetUrl, shortcode) {
         { name: 'AllOrigins Get HTML', url: `https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`,   isAllOrigins: true  },
         { name: 'Codetabs HTML',       url: `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`, isAllOrigins: false }
     ];
-    if (OWN_WORKER_BASE) {
+    if (effectiveWorkerBase) {
         // Yours goes first: fast, cached per post, immune to volunteer outages.
         configs.unshift({
             name: 'OwnWorker HTML',
-            url: `${OWN_WORKER_BASE}/?shortcode=${encodeURIComponent(shortcode || '')}`,
+            url: `${effectiveWorkerBase}/?shortcode=${encodeURIComponent(shortcode || '')}`,
             isAllOrigins: false
         });
     }
@@ -713,10 +723,10 @@ async function enrichCarouselItems(shortcode, knownCount) {
             const scraped = await attemptScrape();
             if (scraped.items.length > knownCount) {
                 console.log(`[Carousel] Enrichment via ${scraped.proxyName}: ${scraped.items.length} slides total`);
-                // Slides now come from the scraping proxy — keep URL-proxy
-                // bookkeeping truthful so previews route through the right source.
-                winningProxyName = scraped.proxyName;
-                return scraped.items;
+                // Pure result: the CALLER applies proxy bookkeeping after its
+                // staleness check, so a late enrich can never repoint a page
+                // the user has already moved away from.
+                return { items: scraped.items, proxyName: scraped.proxyName };
             }
             console.log(`[Carousel] Enrichment scrape (${scraped.proxyName}) agrees with ${knownCount} slide(s); no upgrade`);
             return null;
@@ -826,8 +836,11 @@ async function fetchInstaPhoto() {
             enrichCarouselItems(shortcode, items.length).then(enriched => {
                 if (!enriched || currentShortcode !== shortcode) return;
                 revokeAllCachedBlobs(); // cover blob and stale prefetches are gone
-                galleryItems = enriched;
-                console.log(`[Carousel] Upgraded gallery to ${enriched.length} slides after enrichment`);
+                // Proxy bookkeeping applies HERE — after the staleness check —
+                // so previews route through the proxy that produced these slides.
+                winningProxyName = enriched.proxyName;
+                galleryItems = enriched.items;
+                console.log(`[Carousel] Upgraded gallery to ${enriched.items.length} slides after enrichment`);
                 renderGallery();
                 selectImage(selectedIndex);
             });

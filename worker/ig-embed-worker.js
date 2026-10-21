@@ -9,7 +9,8 @@
  *   resolution work without depending on third-party volunteers.
  *
  * FREE: Cloudflare Workers free plan = 100,000 requests/day, no credit card.
- * Each post is cached for 1 hour, so rarely does it even contact Instagram.
+ * Each post is kept in the Worker's memory for 1 hour, so repeat visitors
+ * rarely re-contact Instagram.
  *
  * HOW TO DEPLOY (≈5 minutes, see worker/README.md for the full walkthrough):
  *   1) Create a free account at https://dash.cloudflare.com (sign up)
@@ -35,6 +36,21 @@ const CORS_HEADERS = {
 // UA passes consistently — verified against live embeds.
 const BROWSER_UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36';
 
+// Worker-rendered embed pages: the same headers served for cache hits and
+// fresh fetches alike.
+const HTML_RESPONSE_HEADERS = {
+    ...CORS_HEADERS,
+    'Content-Type': 'text/html; charset=utf-8',
+    'Cache-Control': 'public, max-age=3600'
+};
+
+// In-Worker cache with a 1-hour TTL. Deliberately NOT the Cache API: the
+// documented behavior of caches.default on *.workers.dev domains is a no-op,
+// and this relay must work with zero configuration. Entries live as long as
+// Cloudflare keeps the isolate warm, so repeat visitors get the fast path.
+const TTL_MS = 60 * 60 * 1000;
+const embedCache = new Map(); // shortcode -> { html, fetchedAt }
+
 function jsonResponse(data, status) {
     return new Response(JSON.stringify(data), {
         status,
@@ -45,7 +61,7 @@ function jsonResponse(data, status) {
 // Cloudflare Workers entry point — plain Web-standard Request/Response, no
 // dependencies.
 export default {
-    async fetch(request, env, ctx) {
+    async fetch(request, env) {
         // Browsers send a preflight OPTIONS before some requests — answer it
         // so the site's fetch() never gets stuck.
         if (request.method === 'OPTIONS') {
@@ -62,10 +78,11 @@ export default {
             return jsonResponse({ error: 'invalid-shortcode' }, 400);
         }
 
-        // 1) Already fetched within the last hour? Serve the cache.
-        const cacheKey = new Request(`https://ig-embed-relay.internal/embed/${shortcode}`);
-        const cached = await caches.default.match(cacheKey);
-        if (cached) return cached;
+        // 1) Repeat visitor within the TTL? Serve the cached page.
+        const cached = embedCache.get(shortcode);
+        if (cached && Date.now() - cached.fetchedAt < TTL_MS) {
+            return new Response(cached.html, { status: 200, headers: HTML_RESPONSE_HEADERS });
+        }
 
         // 2) Fetch the embed page server-side.
         let upstream;
@@ -89,18 +106,8 @@ export default {
             return jsonResponse({ error: 'upstream-rejected', status: upstream.status }, 502);
         }
 
-        // 4) Serve + remember for an hour.
-        const response = new Response(html, {
-            status: 200,
-            headers: {
-                ...CORS_HEADERS,
-                'Content-Type': 'text/html; charset=utf-8',
-                'Cache-Control': 'public, max-age=3600'
-            }
-        });
-        // waitUntil keeps this cache write going after the response is already
-        // sent — the visitor never waits for it.
-        ctx.waitUntil(caches.default.put(cacheKey, response.clone()));
-        return response;
+        // 4) Serve and remember for an hour (in-isolate Map; see note above).
+        embedCache.set(shortcode, { html, fetchedAt: Date.now() });
+        return new Response(html, { status: 200, headers: HTML_RESPONSE_HEADERS });
     }
 };
