@@ -491,7 +491,7 @@ const OWN_WORKER_BASE = ''; // self-hosted relay (deploy steps: worker/README.md
 const runtimeWorkerBase = (() => {
     try {
         const fromUrl = new URLSearchParams(location.search).get('worker') || '';
-        return /^https:\/\/[a-z0-9.-]+([\/?].*)?$/i.test(fromUrl) ? fromUrl : '';
+        return /^https?:\/\/[a-z0-9.:-]+([\/?].*)?$/i.test(fromUrl) ? fromUrl : '';
     } catch (e) { return ''; } // non-browser environment (no location): stay inert
 })();
 // config.js fallback: static hosting has no environment variables, so a
@@ -500,7 +500,7 @@ const runtimeWorkerBase = (() => {
 const persistedWorkerBase = (() => {
     try {
         const fromConfig = typeof window !== 'undefined' && typeof window.IG_WORKER_URL === 'string' ? window.IG_WORKER_URL : '';
-        return /^https:\/\/[a-z0-9.-]+([\/?].*)?$/i.test(fromConfig) ? fromConfig : '';
+        return /^https?:\/\/[a-z0-9.:-]+([\/?].*)?$/i.test(fromConfig) ? fromConfig : '';
     } catch (e) { return ''; } // non-browser environment (no window): stay inert
 })();
 // Baked constant wins over live overrides; the ?worker= param (a deliberate
