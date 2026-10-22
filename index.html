@@ -116,7 +116,7 @@
                 <div class="relative w-full">
                     <input id="instalink" autofocus type="text"
                         class="px-6 py-3.5 rounded-xl bg-instagram-bg border-2 border-instagram-border text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-instagram-magenta text-base tracking-wide transition w-full text-center font-medium"
-                        placeholder="PASTE INSTAGRAM POST URL HERE" spellcheck="false" autocomplete="off"
+                        placeholder="PASTE INSTAGRAM POST OR REEL URL HERE" spellcheck="false" autocomplete="off"
                         data-gramm="false" data-gramm_editor="false" data-enable-grammarly="false" />
                     <button id="clear-btn" onclick="document.getElementById('instalink').value = '';" class="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white transition-colors duration-200">
                         <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -145,7 +145,7 @@
                 <svg class="h-5 w-5 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                 </svg>
-                <span>The URL you entered appears to be incorrect. Please make sure it is correct and the post is public.</span>
+                <span>The URL you entered appears to be incorrect. Please make sure it is correct and the post or reel is public.</span>
             </div>
 
             <!-- Result Section (hidden by default) -->
@@ -255,7 +255,7 @@
 
     <!-- App Logic Scripts -->
     <script src="js/config.js"></script>
-    <script src="js/instaimage.js?v=2.1.8"></script>
+    <script src="js/instaimage.js?v=2.1.9"></script>
     <script>
         // Trigger fetch on Enter key inside URL input
         document.getElementById('instalink').addEventListener('keydown', function (e) {

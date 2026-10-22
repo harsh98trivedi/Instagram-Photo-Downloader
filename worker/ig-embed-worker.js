@@ -71,10 +71,17 @@ export default {
             return jsonResponse({ error: 'method-not-allowed' }, 405);
         }
 
-        const shortcode = (new URL(request.url).searchParams.get('shortcode') || '').trim();
-        // Whitelist input at the boundary: Instagram shortcodes are 5-20
+        const rawParam = (new URL(request.url).searchParams.get('shortcode') || '').trim();
+        let shortcode = rawParam;
+        const urlMatch = rawParam.match(/(?:p|reels?|tv)(?:\/videos?)?\/([A-Za-z0-9_-]+)/i)
+            || rawParam.match(/(?:share|reels)\/([A-Za-z0-9_-]+)/i);
+        if (urlMatch && urlMatch[1]) {
+            shortcode = urlMatch[1];
+        }
+
+        // Whitelist input at the boundary: Instagram shortcodes are 5-25
         // letters/digits/_/-. Everything else is rejected before any upstream hit.
-        if (!/^[A-Za-z0-9_-]{5,20}$/.test(shortcode)) {
+        if (!/^[A-Za-z0-9_-]{5,25}$/.test(shortcode)) {
             return jsonResponse({ error: 'invalid-shortcode' }, 400);
         }
 

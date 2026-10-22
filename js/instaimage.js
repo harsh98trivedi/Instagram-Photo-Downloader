@@ -165,21 +165,48 @@ function parseSingleVideoPost(rawHtmlContent) {
         .replace(/\\"/g, '"')
         .replace(/\\\\/g, '\\');
 
-    if (htmlContent.indexOf('"is_video":true') === -1) return null;
+    if (htmlContent.indexOf('"is_video":true') === -1 && htmlContent.indexOf('"is_video": true') === -1) return null;
 
-    const match = /"shortcode":"([A-Za-z0-9_-]+)","is_video":true,"display_url":"([^"]+)"/.exec(htmlContent);
-    if (!match) return null;
+    // 1. Try standard shortcode + is_video + display_url pattern
+    let match = /"shortcode"\s*:\s*"([A-Za-z0-9_-]+)"\s*,\s*"is_video"\s*:\s*true\s*,\s*"display_url"\s*:\s*"([^"]+)"/.exec(htmlContent);
+    let thumb = null;
+    let rest = '';
 
-    const thumb = cleanInstagramUrl(match[2]);
-    if (!isValidSidecarImageUrl(thumb)) return null;
+    if (match) {
+        thumb = cleanInstagramUrl(match[2]);
+        rest = htmlContent.slice(match.index + match[0].length);
+    } else {
+        // Fallback: look for is_video: true and display_url separately
+        const displayMatch = /"display_url"\s*:\s*"([^"]+)"/.exec(htmlContent);
+        if (displayMatch) {
+            thumb = cleanInstagramUrl(displayMatch[1]);
+        }
+        const isVideoIdx = htmlContent.indexOf('"is_video":true') !== -1 
+            ? htmlContent.indexOf('"is_video":true') 
+            : htmlContent.indexOf('"is_video": true');
+        rest = isVideoIdx !== -1 ? htmlContent.slice(isVideoIdx) : htmlContent;
+    }
+
+    if (!thumb || !isValidSidecarImageUrl(thumb)) {
+        thumb = extractInstagramImage(rawHtmlContent);
+        if (!thumb) return null;
+    }
 
     // Identical window rule to the sidecar scan: heavy video metadata
     // (dash manifests) can push video_url far past display_url.
-    const rest = htmlContent.slice(match.index + match[0].length);
-    let nodeEnd = rest.search(/"shortcode":"|"is_video":/);
+    let nodeEnd = rest.search(/"shortcode"\s*:\s*"|"is_video"\s*:\s*/);
     if (nodeEnd === -1) nodeEnd = rest.length;
-    const videoMatch = rest.slice(0, nodeEnd).match(/"video_url":"([^"]+)"/);
-    const videoUrl = videoMatch ? cleanInstagramUrl(videoMatch[1]) : null;
+    const videoMatch = rest.slice(0, nodeEnd).match(/"video_url"\s*:\s*"([^"]+)"/);
+    let videoUrl = videoMatch ? cleanInstagramUrl(videoMatch[1]) : null;
+
+    // Fallback: if video_url is not in the immediate slice, search the decoded content globally
+    if (!videoUrl) {
+        const globalVideoMatch = htmlContent.match(/"video_url"\s*:\s*"([^"]+)"/);
+        if (globalVideoMatch) {
+            videoUrl = cleanInstagramUrl(globalVideoMatch[1]);
+        }
+    }
+
     if (!videoUrl || !(videoUrl.includes('cdninstagram.com') || videoUrl.includes('fbcdn.net'))) return null;
 
     return { type: 'video', thumb, url: videoUrl };
@@ -189,16 +216,21 @@ function parseSingleVideoPost(rawHtmlContent) {
 function getShortcode(url) {
     if (!url) return null;
     url = url.trim();
-    // Try matching pattern (e.g. /p/SHORTCODE, /reel/SHORTCODE, /tv/SHORTCODE) first
-    const match = url.match(/(?:p|reel|tv)\/([A-Za-z0-9_-]+)/i);
+
+    // 1) Match Instagram path patterns:
+    // /p/CODE, /reel/CODE, /reels/CODE, /tv/CODE, /reels/videos/CODE, /share/p/CODE, /share/reel/CODE, /share/reels/CODE, etc.
+    const match = url.match(/(?:p|reels?|tv)(?:\/videos?)?\/([A-Za-z0-9_-]+)/i)
+        || url.match(/(?:share|reels)\/([A-Za-z0-9_-]+)/i);
     if (match && match[1]) {
         return match[1];
     }
-    // If it is just a shortcode of typical Instagram length (normally 11 characters, but can range from 9 to 15)
+
+    // 2) If it is just a shortcode of typical Instagram length (5 to 25 characters)
     // and consists of valid alphanumeric + underscore/hyphen characters without slashes or dots
-    if (/^[A-Za-z0-9_-]{9,15}$/.test(url)) {
+    if (/^[A-Za-z0-9_-]{5,25}$/.test(url)) {
         return url;
     }
+
     return null;
 }
 
@@ -815,13 +847,13 @@ async function fetchInstaPhoto() {
 
     const urlInput = document.getElementById('instalink').value.trim();
     if (!urlInput) {
-        showError('Please enter an Instagram post URL.');
+        showError('Please enter an Instagram post or reel URL.');
         return;
     }
 
     const shortcode = getShortcode(urlInput);
     if (!shortcode) {
-        showError('Invalid Instagram URL. Please enter a valid post URL (e.g. /p/SHORTCODE/).');
+        showError('Invalid Instagram URL. Please enter a valid post or reel URL (e.g. /reel/SHORTCODE/ or /p/SHORTCODE/).');
         return;
     }
 
