@@ -4,5 +4,4 @@
 // URL (deploy steps: worker/README.md) to arm the relay by default on this
 // site. Keep it commented in commits you send upstream — the committed state
 // stays inert, exactly like OWN_WORKER_BASE in js/instaimage.js.
-//
-// window.IG_WORKER_URL = 'https://your-worker.you.workers.dev';
+window.IG_WORKER_URL = 'https://igpd.harsh98trivedi.workers.dev';
